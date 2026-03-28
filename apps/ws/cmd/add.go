@@ -12,6 +12,7 @@ import (
 )
 
 var addAgent string
+var addTask string
 
 var addCmd = &cobra.Command{
 	Use:   "add <name>",
@@ -74,7 +75,15 @@ The agent flag determines which coding agent launches in the session.`,
 
 		// Launch agent if specified
 		if addAgent != "" {
-			tmuxSend := exec.Command("tmux", "send-keys", "-t", sessionName, addAgent, "Enter")
+			agentCmd := addAgent
+			if addAgent == "amp" && addTask != "" {
+				agentCmd = fmt.Sprintf("amp --dangerously-allow-all -x %q", addTask)
+			} else if addAgent == "claude" && addTask != "" {
+				agentCmd = fmt.Sprintf("claude --dangerously-skip-permissions -p %q", addTask)
+			} else if addAgent == "codex" && addTask != "" {
+				agentCmd = fmt.Sprintf("codex --full-auto -m %q", addTask)
+			}
+			tmuxSend := exec.Command("tmux", "send-keys", "-t", sessionName, agentCmd, "Enter")
 			if out, err := tmuxSend.CombinedOutput(); err != nil {
 				return fmt.Errorf("tmux send-keys: %s", string(out))
 			}
@@ -116,5 +125,6 @@ The agent flag determines which coding agent launches in the session.`,
 
 func init() {
 	addCmd.Flags().StringVarP(&addAgent, "agent", "a", "", "Agent to launch (claude, amp, codex)")
+	addCmd.Flags().StringVarP(&addTask, "task", "t", "", "Task description for the agent")
 	rootCmd.AddCommand(addCmd)
 }
