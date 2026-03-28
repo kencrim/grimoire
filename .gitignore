@@ -1,0 +1,5 @@
+dist/
+.task/
+*.exe
+.DS_Store
+.claude/
