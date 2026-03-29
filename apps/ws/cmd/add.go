@@ -145,7 +145,7 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		paneID = strings.TrimSpace(string(out))
 		// Inject initial task after agent starts
 		if task != "" {
-			time.Sleep(3 * time.Second)
+			waitForPane(paneID)
 			taskSend := exec.Command("tmux", "send-keys", "-t", paneID, task, "Enter")
 			taskSend.CombinedOutput()
 		}
@@ -169,7 +169,15 @@ func createWorkstream(name, agent, task, socketPath string) error {
 			paneID = strings.TrimSpace(string(out))
 		}
 
-		// Launch agent-run inside the session (no -x flag — Amp starts interactive)
+		// Split into agent (left, 65%) and terminal (right, 35%)
+		// The initial pane becomes the agent pane; split-window creates the terminal pane
+		splitCmd := exec.Command("tmux", "split-window", "-h", "-d",
+			"-t", paneID,
+			"-c", absPath,
+			"-l", "35%")
+		splitCmd.CombinedOutput()
+
+		// Launch agent-run in the left pane (the original pane)
 		if agent != "" {
 			agentRunCmd := fmt.Sprintf("%s agent-run --id %s --agent %s --socket %s",
 				wsBin(), name, agent, socketPath)
@@ -178,11 +186,58 @@ func createWorkstream(name, agent, task, socketPath string) error {
 				return fmt.Errorf("tmux send-keys: %s", string(out))
 			}
 
-			// Inject initial task after Amp starts (give it time to initialize)
+			// Inject initial task after agent starts
 			if task != "" {
-				time.Sleep(3 * time.Second)
+				waitForPane(paneID)
 				taskSend := exec.Command("tmux", "send-keys", "-t", paneID, task, "Enter")
 				taskSend.CombinedOutput()
+			}
+		}
+	}
+
+	// Assign a theme — children inherit from parent, roots get a new one
+	var theme core.WorkstreamTheme
+	var actualSession string // the tmux session this workstream lives in
+
+	if parentID != "" {
+		// Child: inherit parent's theme and session
+		parentNode := tree.Nodes[parentID]
+		if parentNode.Shader != "" {
+			theme = core.ThemeByShader(parentNode.Shader)
+		} else if parentNode.Color != "" {
+			theme = core.ThemeByBorder(parentNode.Color)
+		} else {
+			theme = core.AssignTheme(len(tree.Nodes))
+		}
+		actualSession = parentNode.Session
+	} else {
+		// Root: assign a new theme
+		theme = core.AssignTheme(len(tree.Nodes))
+		actualSession = sessionName
+	}
+
+	// Apply tmux pane styling — border color + background tint
+	if paneID != "" {
+		// Enable border status line on the session
+		exec.Command("tmux", "set", "-t", actualSession, "pane-border-status", "top").Run()
+		exec.Command("tmux", "set", "-p", "-t", paneID, "pane-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+		exec.Command("tmux", "set", "-p", "-t", paneID, "pane-active-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+		// Background tint for visual identity
+		exec.Command("tmux", "select-pane", "-t", paneID, "-P", fmt.Sprintf("bg=%s", theme.Tint)).Run()
+	}
+
+	// For root workstreams, also apply tint to the terminal pane (right side)
+	if parentID == "" {
+		listPanes := exec.Command("tmux", "list-panes", "-t", actualSession, "-F", "#{pane_id}")
+		if out, err := listPanes.Output(); err == nil {
+			panes := strings.Split(strings.TrimSpace(string(out)), "\n")
+			for _, p := range panes {
+				p = strings.TrimSpace(p)
+				if p != "" && p != paneID {
+					exec.Command("tmux", "select-pane", "-t", p, "-P", fmt.Sprintf("bg=%s", theme.Tint)).Run()
+					exec.Command("tmux", "set", "-p", "-t", p, "pane-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+					exec.Command("tmux", "set", "-p", "-t", p, "pane-active-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+				}
 			}
 		}
 	}
@@ -197,8 +252,10 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		Status:    core.StatusRunning,
 		Agent:     agent,
 		WorkDir:   absPath,
-		Session:   sessionName,
+		Session:   actualSession, // children live in parent's session
 		PaneID:    paneID,
+		Color:     theme.Border,
+		Shader:    theme.Shader,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -223,8 +280,46 @@ func createWorkstream(name, agent, task, socketPath string) error {
 	if parentID != "" {
 		fmt.Printf("  Parent:    %s (split pane)\n", parentID)
 	}
-	fmt.Printf("\nSwitch to it: ws switch %s\n", name)
+	fmt.Printf("  Theme:     %s (border: %s)\n", theme.Label, theme.Border)
+
+	// Apply shader and switch to the new workstream
+	if node.Shader != "" {
+		applyShader(node.Shader)
+	}
+
+	target := node.PaneID
+	if target == "" {
+		target = node.Session
+	}
+
+	if os.Getenv("TMUX") != "" {
+		tmuxSwitch := exec.Command("tmux", "switch-client", "-t", target)
+		tmuxSwitch.Stdin = os.Stdin
+		tmuxSwitch.Stdout = os.Stdout
+		tmuxSwitch.Stderr = os.Stderr
+		tmuxSwitch.Run()
+	} else {
+		tmuxAttach := exec.Command("tmux", "attach-session", "-t", node.Session)
+		tmuxAttach.Stdin = os.Stdin
+		tmuxAttach.Stdout = os.Stdout
+		tmuxAttach.Stderr = os.Stderr
+		tmuxAttach.Run()
+	}
+
 	return nil
+}
+
+// waitForPane polls until a tmux pane is ready (has a running process).
+// Times out after 15 seconds.
+func waitForPane(paneID string) {
+	for i := 0; i < 30; i++ {
+		time.Sleep(500 * time.Millisecond)
+		check := exec.Command("tmux", "display-message", "-t", paneID, "-p", "#{pane_pid}")
+		if check.Run() == nil {
+			return
+		}
+	}
+	log.Printf("[ws add] warning: pane %s not ready after 15s, proceeding anyway", paneID)
 }
 
 // ensureDaemon starts the daemon in the background if it's not running.

@@ -3,9 +3,13 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kencrim/grimoire/libs/relay"
@@ -23,73 +27,158 @@ func toolError(text string) *mcp.CallToolResult {
 
 // relayClient talks to the ws daemon over Unix socket.
 type relayClient struct {
-	agentID string
-	conn    net.Conn
-	enc     *json.Encoder
-	dec     *json.Decoder
+	agentID    string
+	socketPath string
+	conn       net.Conn
+	enc        *json.Encoder
+	dec        *json.Decoder
+	mu         sync.Mutex
 }
 
 func newRelayClient(socketPath, agentID string) (*relayClient, error) {
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("connect to daemon at %s: %w", socketPath, err)
+	c := &relayClient{
+		agentID:    agentID,
+		socketPath: socketPath,
 	}
-	return &relayClient{
-		agentID: agentID,
-		conn:    conn,
-		enc:     json.NewEncoder(conn),
-		dec:     json.NewDecoder(conn),
-	}, nil
+	if err := c.connect(); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
-func (c *relayClient) send(to, message string, msgType relay.MessageType) error {
-	msg := relay.Message{
-		From:    c.agentID,
-		To:      to,
-		Type:    msgType,
-		Content: message,
-		Time:    time.Now(),
+func (c *relayClient) connect() error {
+	conn, err := net.Dial("unix", c.socketPath)
+	if err != nil {
+		return fmt.Errorf("connect to daemon at %s: %w", c.socketPath, err)
 	}
-	payload, _ := json.Marshal(msg)
-	env := relay.Envelope{Action: "send", Payload: payload}
-	if err := c.enc.Encode(env); err != nil {
-		return err
-	}
-	var resp map[string]string
-	if err := c.dec.Decode(&resp); err != nil {
-		return err
-	}
-	if errMsg, ok := resp["error"]; ok {
-		return fmt.Errorf("%s", errMsg)
-	}
+	c.conn = conn
+	c.enc = json.NewEncoder(conn)
+	c.dec = json.NewDecoder(conn)
 	return nil
 }
 
+func (c *relayClient) reconnect() error {
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	return c.connect()
+}
+
+func (c *relayClient) doWithRetry(fn func() error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	backoffs := []time.Duration{100 * time.Millisecond, 1 * time.Second, 5 * time.Second}
+
+	// First attempt without reconnect
+	err := fn()
+	if err == nil || !isConnError(err) {
+		return err
+	}
+
+	// Retry with reconnect
+	for i, backoff := range backoffs {
+		log.Printf("[relay-client] connection error, retry %d/%d after %v: %v", i+1, len(backoffs), backoff, err)
+		time.Sleep(backoff)
+		if reconnErr := c.reconnect(); reconnErr != nil {
+			err = reconnErr
+			continue
+		}
+		err = fn()
+		if err == nil || !isConnError(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("after %d retries: %w", len(backoffs), err)
+}
+
+func isConnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
+		return true
+	}
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	return false
+}
+
+func (c *relayClient) send(to, message string, msgType relay.MessageType) error {
+	return c.doWithRetry(func() error {
+		msg := relay.Message{
+			From:    c.agentID,
+			To:      to,
+			Type:    msgType,
+			Content: message,
+			Time:    time.Now(),
+		}
+		payload, _ := json.Marshal(msg)
+		env := relay.Envelope{Action: "send", Payload: payload}
+		if err := c.enc.Encode(env); err != nil {
+			return err
+		}
+		var resp map[string]string
+		if err := c.dec.Decode(&resp); err != nil {
+			return err
+		}
+		if errMsg, ok := resp["error"]; ok {
+			return fmt.Errorf("%s", errMsg)
+		}
+		return nil
+	})
+}
+
 func (c *relayClient) spawn(name, task, ctx string) (relay.SpawnResponse, error) {
-	req := relay.SpawnRequest{
-		ParentID: c.agentID,
-		Name:     name,
-		Task:     task,
-		Context:  ctx,
-	}
-	payload, _ := json.Marshal(req)
-	env := relay.Envelope{Action: "spawn", Payload: payload}
-	if err := c.enc.Encode(env); err != nil {
-		return relay.SpawnResponse{}, err
-	}
 	var resp relay.SpawnResponse
-	return resp, c.dec.Decode(&resp)
+	err := c.doWithRetry(func() error {
+		req := relay.SpawnRequest{
+			ParentID: c.agentID,
+			Name:     name,
+			Task:     task,
+			Context:  ctx,
+		}
+		payload, _ := json.Marshal(req)
+		env := relay.Envelope{Action: "spawn", Payload: payload}
+		if err := c.enc.Encode(env); err != nil {
+			return err
+		}
+		return c.dec.Decode(&resp)
+	})
+	return resp, err
 }
 
 func (c *relayClient) status(agentID string) (json.RawMessage, error) {
-	req := relay.StatusRequest{AgentID: agentID}
-	payload, _ := json.Marshal(req)
-	env := relay.Envelope{Action: "status", Payload: payload}
-	if err := c.enc.Encode(env); err != nil {
-		return nil, err
-	}
 	var resp json.RawMessage
-	return resp, c.dec.Decode(&resp)
+	err := c.doWithRetry(func() error {
+		req := relay.StatusRequest{AgentID: agentID}
+		payload, _ := json.Marshal(req)
+		env := relay.Envelope{Action: "status", Payload: payload}
+		if err := c.enc.Encode(env); err != nil {
+			return err
+		}
+		return c.dec.Decode(&resp)
+	})
+	return resp, err
+}
+
+func (c *relayClient) kill(agentID string) (relay.KillResponse, error) {
+	var resp relay.KillResponse
+	err := c.doWithRetry(func() error {
+		req := relay.KillRequest{AgentID: agentID}
+		payload, _ := json.Marshal(req)
+		env := relay.Envelope{Action: "kill", Payload: payload}
+		if err := c.enc.Encode(env); err != nil {
+			return err
+		}
+		return c.dec.Decode(&resp)
+	})
+	return resp, err
 }
 
 func (c *relayClient) close() {
@@ -189,7 +278,12 @@ var relayServerCmd = &cobra.Command{
 			Name:        "relay_kill",
 			Description: "Terminate a child agent and its entire subtree.",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input RelayKillInput) (*mcp.CallToolResult, any, error) {
-			return toolText(fmt.Sprintf("kill request sent for %s", input.AgentID)), nil, nil
+			resp, err := client.kill(input.AgentID)
+			if err != nil {
+				return toolError(err.Error()), nil, nil
+			}
+			result, _ := json.Marshal(resp)
+			return toolText(string(result)), nil, nil
 		})
 
 		log.Printf("[relay-server] agent=%s socket=%s — MCP server starting on stdio", agentID, socketPath)

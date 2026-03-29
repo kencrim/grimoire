@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kencrim/grimoire/libs/core"
 	"github.com/kencrim/grimoire/libs/relay"
 	"github.com/spf13/cobra"
 )
@@ -79,6 +80,42 @@ var daemonStartCmd = &cobra.Command{
 
 		daemon := relay.NewDaemon()
 
+		// Rehydrate agent registry from state.json
+		if tree, err := core.LoadTree(core.DefaultStatePath()); err != nil {
+			log.Printf("[daemon] warning: could not load state: %v", err)
+		} else {
+			rehydrated := 0
+			for _, node := range tree.Nodes {
+				// Check if the tmux session/pane is still alive
+				alive := false
+				if node.PaneID != "" {
+					check := exec.Command("tmux", "display-message", "-t", node.PaneID, "-p", "")
+					alive = check.Run() == nil
+				} else if node.Session != "" {
+					check := exec.Command("tmux", "has-session", "-t", node.Session)
+					alive = check.Run() == nil
+				}
+
+				if alive {
+					daemon.Register(&relay.AgentHandle{
+						ID:           node.ID,
+						ParentID:     node.ParentID,
+						Agent:        node.Agent,
+						WorktreePath: node.WorkDir,
+						Session:      node.Session,
+						PaneID:       node.PaneID,
+						Status:       "alive",
+					})
+					rehydrated++
+				} else {
+					log.Printf("[daemon] skipped dead agent %q", node.ID)
+				}
+			}
+			if rehydrated > 0 {
+				log.Printf("[daemon] rehydrated %d agent(s) from state.json", rehydrated)
+			}
+		}
+
 		// Wire up spawn handler — when an agent calls relay_spawn,
 		// the daemon creates a child workstream
 		daemon.SetSpawnHandler(func(req relay.SpawnRequest) (relay.SpawnResponse, error) {
@@ -92,6 +129,52 @@ var daemonStartCmd = &cobra.Command{
 			return relay.SpawnResponse{
 				AgentID: childName,
 				Status:  "spawned",
+			}, nil
+		})
+
+		// Wire up kill handler — when an agent calls relay_kill,
+		// the daemon tears down the child workstream
+		daemon.SetKillHandler(func(req relay.KillRequest) (relay.KillResponse, error) {
+			log.Printf("[daemon] kill requested: %s", req.AgentID)
+
+			tree, err := core.LoadTree(core.DefaultStatePath())
+			if err != nil {
+				return relay.KillResponse{}, fmt.Errorf("load state: %w", err)
+			}
+
+			removed, err := tree.Remove(req.AgentID)
+			if err != nil {
+				return relay.KillResponse{}, err
+			}
+
+			var killedIDs []string
+			for _, node := range removed {
+				// Kill tmux pane (prefer PaneID for split panes) or session
+				if node.PaneID != "" {
+					exec.Command("tmux", "kill-pane", "-t", node.PaneID).Run()
+				} else {
+					exec.Command("tmux", "kill-session", "-t", node.Session).Run()
+				}
+
+				// Remove git worktree
+				if node.Type == core.NodeTypeLocal && node.WorkDir != "" {
+					gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
+					if out, err := gitRemove.CombinedOutput(); err != nil {
+						log.Printf("[daemon] warning: worktree remove %s: %s", node.WorkDir, string(out))
+					}
+				}
+
+				killedIDs = append(killedIDs, node.ID)
+				log.Printf("[daemon] killed agent %s", node.ID)
+			}
+
+			if err := tree.Save(); err != nil {
+				log.Printf("[daemon] warning: could not save state after kill: %v", err)
+			}
+
+			return relay.KillResponse{
+				Killed: killedIDs,
+				Status: "killed",
 			}, nil
 		})
 

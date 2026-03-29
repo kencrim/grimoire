@@ -31,9 +31,15 @@ For other agents, uses tmux send-keys as a fallback.`,
 			return fmt.Errorf("workstream %q not found", name)
 		}
 
-		// For now, use tmux send-keys as universal fallback
-		// Phase 2 will add JSONL stdin injection for Amp
-		tmuxSend := exec.Command("tmux", "send-keys", "-t", node.Session, message, "Enter")
+		// Prefer PaneID for split-pane workstreams, fall back to Session
+		target := node.PaneID
+		if target == "" {
+			target = node.Session
+			if target == "" {
+				target = "ws/" + name
+			}
+		}
+		tmuxSend := exec.Command("tmux", "send-keys", "-t", target, message, "Enter")
 		if out, err := tmuxSend.CombinedOutput(); err != nil {
 			return fmt.Errorf("send failed: %s", string(out))
 		}

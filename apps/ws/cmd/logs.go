@@ -26,8 +26,17 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("workstream %q not found", name)
 		}
 
+		// Prefer PaneID for split panes, fall back to session
+		target := node.PaneID
+		if target == "" {
+			target = node.Session
+			if target == "" {
+				target = "ws/" + name
+			}
+		}
+
 		// Capture last 50 lines of the pane
-		capture := exec.Command("tmux", "capture-pane", "-p", "-t", node.Session, "-S", "-50")
+		capture := exec.Command("tmux", "capture-pane", "-p", "-t", target, "-S", "-50")
 		capture.Stdout = os.Stdout
 		capture.Stderr = os.Stderr
 		return capture.Run()

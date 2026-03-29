@@ -50,6 +50,17 @@ type AgentStatus struct {
 	Task   string `json:"task,omitempty"`
 }
 
+// KillRequest asks the daemon to terminate an agent and its descendants.
+type KillRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// KillResponse is returned after killing an agent subtree.
+type KillResponse struct {
+	Killed []string `json:"killed"`
+	Status string   `json:"status"`
+}
+
 // AmpJSONL is the JSONL format Amp expects on stdin.
 type AmpJSONL struct {
 	Type    string          `json:"type"`

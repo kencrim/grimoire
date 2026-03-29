@@ -16,18 +16,23 @@ tasks:
     sources:
       - apps/ws/**/*.go
       - libs/core/**/*.go
+      - libs/relay/**/*.go
     generates:
       - "{{.DIST}}/ws"
 
   test:
     desc: Test all modules
     cmds:
-      - go test ./...
+      - cd libs/core && go test ./...
+      - cd libs/relay && go test ./...
+      - cd apps/ws && go test ./...
 
   lint:
     desc: Lint all modules
     cmds:
-      - golangci-lint run ./...
+      - cd libs/core && golangci-lint run ./...
+      - cd libs/relay && golangci-lint run ./...
+      - cd apps/ws && golangci-lint run ./...
 
   fmt:
     desc: Format all Go files
@@ -40,6 +45,7 @@ tasks:
       - go work sync
       - cd apps/ws && go mod tidy
       - cd libs/core && go mod tidy
+      - cd libs/relay && go mod tidy
 
   install:
     desc: Install ws to ~/bin

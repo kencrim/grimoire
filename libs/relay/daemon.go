@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // AgentHandle represents a running agent process.
@@ -26,10 +27,12 @@ type AgentHandle struct {
 
 // Daemon manages the agent registry and routes messages.
 type Daemon struct {
-	agents   map[string]*AgentHandle
-	mu       sync.RWMutex
-	listener net.Listener
-	onSpawn  func(SpawnRequest) (SpawnResponse, error) // callback for spawning
+	agents    map[string]*AgentHandle
+	mu        sync.RWMutex
+	listener  net.Listener
+	onSpawn   func(SpawnRequest) (SpawnResponse, error)   // callback for spawning
+	onKill    func(KillRequest) (KillResponse, error)     // callback for killing
+	deliverFn func(agent *AgentHandle, text string) error // injectable for testing
 }
 
 // DefaultSocketPath returns the Unix socket path for the daemon.
@@ -39,14 +42,21 @@ func DefaultSocketPath() string {
 
 // NewDaemon creates a new relay daemon.
 func NewDaemon() *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		agents: make(map[string]*AgentHandle),
 	}
+	d.deliverFn = d.tmuxDeliver
+	return d
 }
 
 // SetSpawnHandler sets the callback invoked when an agent requests a spawn.
 func (d *Daemon) SetSpawnHandler(fn func(SpawnRequest) (SpawnResponse, error)) {
 	d.onSpawn = fn
+}
+
+// SetKillHandler sets the callback invoked when an agent requests a kill.
+func (d *Daemon) SetKillHandler(fn func(KillRequest) (KillResponse, error)) {
+	d.onKill = fn
 }
 
 // Register adds an agent to the registry.
@@ -115,7 +125,7 @@ func (d *Daemon) Route(msg Message) error {
 	}
 }
 
-// deliver sends a message to an agent via tmux send-keys.
+// deliver sends a message to an agent using the configured deliverFn.
 func (d *Daemon) deliver(agentID string, msg Message) error {
 	agent, ok := d.agents[agentID]
 	if !ok {
@@ -125,22 +135,40 @@ func (d *Daemon) deliver(agentID string, msg Message) error {
 	prefix := "[relay from " + msg.From + "] (" + string(msg.Type) + ") "
 	text := prefix + msg.Content
 
+	return d.deliverFn(agent, text)
+}
+
+// tmuxDeliver is the default deliverFn that sends text via tmux send-keys.
+func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
 	// Prefer pane ID (works for split panes), fall back to session name
 	target := agent.PaneID
 	if target == "" {
 		target = agent.Session
 		if target == "" {
-			target = "ws/" + agentID
+			target = "ws/" + agent.ID
 		}
 	}
 
-	cmd := exec.Command("tmux", "send-keys", "-t", target, text, "Enter")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux send-keys to %q (agent %q): %s", target, agentID, string(out))
+	// Verify the target pane exists before sending
+	check := exec.Command("tmux", "display-message", "-t", target, "-p", "#{pane_id}")
+	if err := check.Run(); err != nil {
+		return fmt.Errorf("pane %q not reachable for agent %q: %w", target, agent.ID, err)
 	}
 
-	log.Printf("[daemon] delivered message from %q to %q via tmux (target: %s)", msg.From, agentID, target)
-	return nil
+	// Retry up to 2 times on failure with 500ms backoff
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		cmd := exec.Command("tmux", "send-keys", "-t", target, text, "Enter")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			lastErr = fmt.Errorf("tmux send-keys to %q (agent %q): %s", target, agent.ID, string(out))
+			log.Printf("[daemon] deliver attempt %d/%d failed: %v", attempt+1, 3, lastErr)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		log.Printf("[daemon] delivered message to agent %q via tmux (target: %s)", agent.ID, target)
+		return nil
+	}
+	return lastErr
 }
 
 // ListAgents returns all registered agents.
@@ -201,6 +229,7 @@ type RegisterPayload struct {
 	ParentID string `json:"parent_id,omitempty"`
 	Agent    string `json:"agent"`
 	PaneID   string `json:"pane_id,omitempty"`
+	WorkDir  string `json:"work_dir,omitempty"`
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {
@@ -256,6 +285,24 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				}
 			}
 
+		case "kill":
+			var req KillRequest
+			if err = json.Unmarshal(env.Payload, &req); err == nil {
+				if d.onKill != nil {
+					var kr KillResponse
+					kr, err = d.onKill(req)
+					if err == nil {
+						// Unregister all killed agents from in-memory map
+						for _, killedID := range kr.Killed {
+							d.Unregister(killedID)
+						}
+					}
+					resp = kr
+				} else {
+					err = fmt.Errorf("no kill handler configured")
+				}
+			}
+
 		case "register":
 			var reg RegisterPayload
 			if err = json.Unmarshal(env.Payload, &reg); err == nil {
@@ -268,20 +315,31 @@ func (d *Daemon) handleConn(conn net.Conn) {
 					if reg.PaneID != "" {
 						existing.PaneID = reg.PaneID
 					}
+					if reg.WorkDir != "" {
+						existing.WorktreePath = reg.WorkDir
+					}
 				} else {
 					// Create new handle
 					d.agents[reg.AgentID] = &AgentHandle{
-						ID:       reg.AgentID,
-						ParentID: reg.ParentID,
-						Agent:    reg.Agent,
-						Session:  "ws/" + reg.AgentID,
-						PaneID:   reg.PaneID,
-						Status:   "alive",
+						ID:           reg.AgentID,
+						ParentID:     reg.ParentID,
+						Agent:        reg.Agent,
+						WorktreePath: reg.WorkDir,
+						Session:      "ws/" + reg.AgentID,
+						PaneID:       reg.PaneID,
+						Status:       "alive",
 					}
 				}
 				d.mu.Unlock()
 				log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
 				resp = map[string]string{"status": "registered"}
+			}
+
+		case "unregister":
+			var reg RegisterPayload
+			if err = json.Unmarshal(env.Payload, &reg); err == nil {
+				d.Unregister(reg.AgentID)
+				resp = map[string]string{"status": "unregistered"}
 			}
 
 		default:

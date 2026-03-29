@@ -37,6 +37,7 @@ var agentRunCmd = &cobra.Command{
 		paneID := os.Getenv("TMUX_PANE")
 
 		// Register with daemon
+		workDir, _ := os.Getwd()
 		conn, err := net.Dial("unix", socketPath)
 		if err != nil {
 			log.Printf("[agent-run] warning: could not connect to daemon: %v", err)
@@ -47,6 +48,7 @@ var agentRunCmd = &cobra.Command{
 				ParentID: parentID,
 				Agent:    agentType,
 				PaneID:   paneID,
+				WorkDir:  workDir,
 			})
 			json.NewEncoder(conn).Encode(relay.Envelope{Action: "register", Payload: regPayload})
 			var resp map[string]string
