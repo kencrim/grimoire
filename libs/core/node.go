@@ -32,6 +32,7 @@ type Node struct {
 	Agent     string     `json:"agent,omitempty"`  // claude, amp, codex
 	WorkDir   string     `json:"work_dir"`         // Worktree or workspace path
 	Session   string     `json:"session"`          // tmux session name
+	PaneID    string     `json:"pane_id,omitempty"` // tmux pane ID (e.g. %5)
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 

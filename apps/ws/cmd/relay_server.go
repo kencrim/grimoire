@@ -13,6 +13,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func toolText(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+}
+
+func toolError(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}, IsError: true}
+}
+
 // relayClient talks to the ws daemon over Unix socket.
 type relayClient struct {
 	agentID string
@@ -48,7 +56,13 @@ func (c *relayClient) send(to, message string, msgType relay.MessageType) error 
 		return err
 	}
 	var resp map[string]string
-	return c.dec.Decode(&resp)
+	if err := c.dec.Decode(&resp); err != nil {
+		return err
+	}
+	if errMsg, ok := resp["error"]; ok {
+		return fmt.Errorf("%s", errMsg)
+	}
+	return nil
 }
 
 func (c *relayClient) spawn(name, task, ctx string) (relay.SpawnResponse, error) {
@@ -137,9 +151,9 @@ var relayServerCmd = &cobra.Command{
 				msgType = relay.MessageType(input.Type)
 			}
 			if err := client.send(input.To, input.Message, msgType); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil, nil
+				return toolError(err.Error()), nil, nil
 			}
-			return mcp.NewToolResultText("delivered"), nil, nil
+			return toolText("delivered"), nil, nil
 		})
 
 		// relay_spawn
@@ -149,10 +163,10 @@ var relayServerCmd = &cobra.Command{
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input RelaySpawnInput) (*mcp.CallToolResult, any, error) {
 			resp, err := client.spawn(input.Name, input.Task, input.Context)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil, nil
+				return toolError(err.Error()), nil, nil
 			}
 			result, _ := json.Marshal(resp)
-			return mcp.NewToolResultText(string(result)), nil, nil
+			return toolText(string(result)), nil, nil
 		})
 
 		// relay_status
@@ -165,9 +179,9 @@ var relayServerCmd = &cobra.Command{
 			}
 			resp, err := client.status(input.AgentID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil, nil
+				return toolError(err.Error()), nil, nil
 			}
-			return mcp.NewToolResultText(string(resp)), nil, nil
+			return toolText(string(resp)), nil, nil
 		})
 
 		// relay_kill
@@ -175,9 +189,7 @@ var relayServerCmd = &cobra.Command{
 			Name:        "relay_kill",
 			Description: "Terminate a child agent and its entire subtree.",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input RelayKillInput) (*mcp.CallToolResult, any, error) {
-			// For now, send a kill action to the daemon
-			// Full implementation in Phase 3
-			return mcp.NewToolResultText(fmt.Sprintf("kill request sent for %s", input.AgentID)), nil, nil
+			return toolText(fmt.Sprintf("kill request sent for %s", input.AgentID)), nil, nil
 		})
 
 		log.Printf("[relay-server] agent=%s socket=%s — MCP server starting on stdio", agentID, socketPath)

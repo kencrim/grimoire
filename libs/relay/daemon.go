@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 )
@@ -19,6 +20,7 @@ type AgentHandle struct {
 	Stdin        io.Writer // JSONL injection point
 	WorktreePath string
 	Session      string // tmux session name
+	PaneID       string // tmux pane ID (e.g. %5) — used for targeting split panes
 	Status       string // alive, idle, exited
 }
 
@@ -96,32 +98,48 @@ func (d *Daemon) Route(msg Message) error {
 		return nil
 
 	default:
-		return d.deliver(target, msg)
+		// Try exact match first
+		if _, ok := d.agents[target]; ok {
+			return d.deliver(target, msg)
+		}
+		// Resolve short name relative to sender: if "auth" sends to "Explore",
+		// look up "auth/Explore"
+		if sender, ok := d.agents[msg.From]; ok {
+			qualified := sender.ID + "/" + target
+			if _, ok := d.agents[qualified]; ok {
+				log.Printf("[daemon] resolved short name %q -> %q (sender: %s)", target, qualified, msg.From)
+				return d.deliver(qualified, msg)
+			}
+		}
+		return d.deliver(target, msg) // will fail with "not found" error
 	}
 }
 
-// deliver writes a message to an agent's stdin in Amp JSONL format.
+// deliver sends a message to an agent via tmux send-keys.
 func (d *Daemon) deliver(agentID string, msg Message) error {
 	agent, ok := d.agents[agentID]
 	if !ok {
 		return fmt.Errorf("agent %q not found", agentID)
 	}
-	if agent.Stdin == nil {
-		return fmt.Errorf("agent %q has no stdin writer", agentID)
+
+	prefix := "[relay from " + msg.From + "] (" + string(msg.Type) + ") "
+	text := prefix + msg.Content
+
+	// Prefer pane ID (works for split panes), fall back to session name
+	target := agent.PaneID
+	if target == "" {
+		target = agent.Session
+		if target == "" {
+			target = "ws/" + agentID
+		}
 	}
 
-	ampMsg := FormatForAmp(msg)
-	data, err := json.Marshal(ampMsg)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	data = append(data, '\n')
-
-	if _, err := agent.Stdin.Write(data); err != nil {
-		return fmt.Errorf("write to %q stdin: %w", agentID, err)
+	cmd := exec.Command("tmux", "send-keys", "-t", target, text, "Enter")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys to %q (agent %q): %s", target, agentID, string(out))
 	}
 
-	log.Printf("[daemon] delivered message from %q to %q", msg.From, agentID)
+	log.Printf("[daemon] delivered message from %q to %q via tmux (target: %s)", msg.From, agentID, target)
 	return nil
 }
 
@@ -182,6 +200,7 @@ type RegisterPayload struct {
 	AgentID  string `json:"agent_id"`
 	ParentID string `json:"parent_id,omitempty"`
 	Agent    string `json:"agent"`
+	PaneID   string `json:"pane_id,omitempty"`
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {
@@ -240,8 +259,28 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		case "register":
 			var reg RegisterPayload
 			if err = json.Unmarshal(env.Payload, &reg); err == nil {
-				// Registration is noted but stdin handle must be set separately
-				log.Printf("[daemon] MCP adapter registered for agent %q", reg.AgentID)
+				d.mu.Lock()
+				if existing, ok := d.agents[reg.AgentID]; ok {
+					// Update existing handle
+					existing.Agent = reg.Agent
+					existing.ParentID = reg.ParentID
+					existing.Status = "alive"
+					if reg.PaneID != "" {
+						existing.PaneID = reg.PaneID
+					}
+				} else {
+					// Create new handle
+					d.agents[reg.AgentID] = &AgentHandle{
+						ID:       reg.AgentID,
+						ParentID: reg.ParentID,
+						Agent:    reg.Agent,
+						Session:  "ws/" + reg.AgentID,
+						PaneID:   reg.PaneID,
+						Status:   "alive",
+					}
+				}
+				d.mu.Unlock()
+				log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
 				resp = map[string]string{"status": "registered"}
 			}
 

@@ -46,6 +46,8 @@ tasks:
     deps: [build:ws]
     cmds:
       - cp {{.DIST}}/ws ~/bin/ws
+      - xattr -c ~/bin/ws
+      - codesign -s - -f ~/bin/ws
       - echo "Installed ws to ~/bin/ws"
 
   clean:

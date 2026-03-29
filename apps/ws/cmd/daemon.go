@@ -5,9 +5,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kencrim/grimoire/libs/relay"
 	"github.com/spf13/cobra"
@@ -24,6 +26,7 @@ var daemonStartCmd = &cobra.Command{
 	Short: "Start the relay daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		socketPath := relay.DefaultSocketPath()
+		foreground, _ := cmd.Flags().GetBool("foreground")
 
 		// Check if already running
 		conn, err := net.Dial("unix", socketPath)
@@ -32,12 +35,65 @@ var daemonStartCmd = &cobra.Command{
 			return fmt.Errorf("daemon already running at %s", socketPath)
 		}
 
+		// If not foreground, re-exec ourselves in the background
+		if !foreground {
+			logFile, _ := os.Create(filepath.Join(os.TempDir(), "ws-daemon.log"))
+			bgCmd := exec.Command(wsBin(), "daemon", "start", "--foreground")
+			bgCmd.Stdout = logFile
+			bgCmd.Stderr = logFile
+			bgCmd.Stdin = nil
+			bgCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if err := bgCmd.Start(); err != nil {
+				return fmt.Errorf("start background daemon: %w", err)
+			}
+			// Wait for socket
+			for i := 0; i < 20; i++ {
+				time.Sleep(100 * time.Millisecond)
+				c, err := net.Dial("unix", socketPath)
+				if err == nil {
+					c.Close()
+					fmt.Printf("ws daemon started (pid %d)\n", bgCmd.Process.Pid)
+					return nil
+				}
+			}
+			return fmt.Errorf("daemon did not start within 2 seconds")
+		}
+
+		// Set up log file so daemon output is captured.
+		// Redirect both log.* and fmt.Print* (stdout) to the log file,
+		// since createWorkstream uses fmt.Printf for status output.
+		logPath := filepath.Join(os.TempDir(), "ws-daemon.log")
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return fmt.Errorf("open log file: %w", err)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+		os.Stdout = logFile
+		os.Stderr = logFile
+
 		// Write PID file
 		pidPath := filepath.Join(os.TempDir(), "ws-relay.pid")
 		os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
 		defer os.Remove(pidPath)
 
 		daemon := relay.NewDaemon()
+
+		// Wire up spawn handler — when an agent calls relay_spawn,
+		// the daemon creates a child workstream
+		daemon.SetSpawnHandler(func(req relay.SpawnRequest) (relay.SpawnResponse, error) {
+			childName := req.ParentID + "/" + req.Name
+			log.Printf("[daemon] spawn requested: %s (parent: %s)", childName, req.ParentID)
+
+			if err := createWorkstream(childName, "amp", req.Task, socketPath); err != nil {
+				return relay.SpawnResponse{}, err
+			}
+
+			return relay.SpawnResponse{
+				AgentID: childName,
+				Status:  "spawned",
+			}, nil
+		})
 
 		// Handle shutdown
 		sigCh := make(chan os.Signal, 1)
@@ -104,6 +160,8 @@ var daemonStatusCmd = &cobra.Command{
 }
 
 func init() {
+	daemonStartCmd.Flags().Bool("foreground", false, "Run in foreground (used internally)")
+	daemonStartCmd.Flags().MarkHidden("foreground")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
