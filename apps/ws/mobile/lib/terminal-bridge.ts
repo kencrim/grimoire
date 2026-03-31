@@ -117,11 +117,9 @@ export function generateXtermHtml(): string {
     sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
   }, 100);
 
-  // Re-fit on window resize
-  window.addEventListener('resize', function() {
-    fitAddon.fit();
-    sendToRN({ type: 'fit', cols: term.cols, rows: term.rows });
-  });
+  // Note: we do NOT re-fit on window resize. The server sends the desktop's
+  // terminal dimensions with each frame, and we resize to match. The phone
+  // is a viewport into the desktop terminal, not an independent terminal.
 
   // Track whether the user has scrolled up — if so, don't auto-scroll to bottom
   var userScrolledUp = false;
@@ -156,8 +154,6 @@ export function generateXtermHtml(): string {
       if (newSize !== currentFontSize) {
         currentFontSize = newSize;
         term.options.fontSize = newSize;
-        fitAddon.fit();
-        sendToRN({ type: 'fit', cols: term.cols, rows: term.rows });
       }
     }
   }, { passive: true });
@@ -208,6 +204,11 @@ export function generateXtermHtml(): string {
         case 'write':
           if (msg.data) {
             if (msg.cols && msg.rows) {
+              // Full snapshot: resize xterm to match the desktop terminal,
+              // then clear and write. The phone is a viewport — pinch to zoom.
+              if (term.cols !== msg.cols || term.rows !== msg.rows) {
+                term.resize(msg.cols, msg.rows);
+              }
               term.write('\x1b[H\x1b[2J' + msg.data, function() {
                 if (!userScrolledUp) {
                   term.scrollToBottom();

@@ -1,12 +1,9 @@
 package relay
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,8 +13,7 @@ import (
 
 // PaneStreamer handles bidirectional terminal I/O for a tmux pane.
 type PaneStreamer struct {
-	target   string // tmux pane ID (e.g. %5) or session name
-	pipePath string // named pipe for pipe-pane output
+	target string // tmux pane ID (e.g. %5) or session name
 }
 
 // PaneFrame is a captured terminal snapshot sent to the phone.
@@ -30,103 +26,19 @@ type PaneFrame struct {
 
 // NewPaneStreamer creates a streamer for a tmux pane.
 func NewPaneStreamer(target string) *PaneStreamer {
-	// Create a unique named pipe for this pane stream
-	safeTarget := strings.ReplaceAll(strings.ReplaceAll(target, "%", "p"), "/", "_")
-	pipePath := fmt.Sprintf("%s/ws-pane-%s-%d", os.TempDir(), safeTarget, time.Now().UnixNano())
-
 	return &PaneStreamer{
-		target:   target,
-		pipePath: pipePath,
+		target: target,
 	}
 }
 
-// StreamTo streams pane output over the WebSocket using tmux pipe-pane.
-// Falls back to capture-pane polling if pipe-pane fails.
+// StreamTo streams pane output over the WebSocket using capture-pane polling.
+// Each frame is a full snapshot of the pane content with ANSI escape sequences
+// preserved, so the phone gets an accurate viewport into the desktop terminal.
 func (ps *PaneStreamer) StreamTo(ctx context.Context, conn *websocket.Conn) {
-	// Try pipe-pane first for real-time streaming
-	if err := ps.streamViaPipe(ctx, conn); err != nil {
-		log.Printf("[pane-stream] pipe-pane failed for %s, falling back to capture-pane: %v", ps.target, err)
-		ps.streamViaCapture(ctx, conn)
-	}
+	ps.streamViaCapture(ctx, conn)
 }
 
-// streamViaPipe uses tmux pipe-pane to get a real-time byte stream.
-func (ps *PaneStreamer) streamViaPipe(ctx context.Context, conn *websocket.Conn) error {
-	// Create named pipe (FIFO)
-	if err := exec.Command("mkfifo", ps.pipePath).Run(); err != nil {
-		return fmt.Errorf("mkfifo: %w", err)
-	}
-	defer os.Remove(ps.pipePath)
-
-	// Tell tmux to pipe output to our FIFO
-	pipeCmd := fmt.Sprintf("cat > %s", ps.pipePath)
-	if err := exec.Command("tmux", "pipe-pane", "-o", "-t", ps.target, pipeCmd).Run(); err != nil {
-		return fmt.Errorf("pipe-pane: %w", err)
-	}
-
-	// Detach pipe-pane when done
-	defer exec.Command("tmux", "pipe-pane", "-t", ps.target).Run()
-
-	// Open the FIFO for reading (this blocks until the writer connects)
-	// Run in a goroutine so we can cancel via context
-	type openResult struct {
-		file *os.File
-		err  error
-	}
-	openCh := make(chan openResult, 1)
-	go func() {
-		f, err := os.Open(ps.pipePath)
-		openCh <- openResult{f, err}
-	}()
-
-	var file *os.File
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case result := <-openCh:
-		if result.err != nil {
-			return fmt.Errorf("open fifo: %w", result.err)
-		}
-		file = result.file
-	case <-time.After(3 * time.Second):
-		// FIFO open timed out — pipe-pane might not have started writing yet.
-		// Send one capture-pane frame to prime the connection, then try again.
-		return fmt.Errorf("fifo open timeout")
-	}
-	defer file.Close()
-
-	// Send an initial capture-pane snapshot so the phone sees content immediately
-	ps.sendCaptureFrame(ctx, conn)
-
-	// Stream pipe output in chunks
-	reader := bufio.NewReaderSize(file, 4096)
-	buf := make([]byte, 4096)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		n, err := reader.Read(buf)
-		if n > 0 {
-			frame := PaneFrame{
-				Type:    "frame",
-				Content: string(buf[:n]),
-			}
-			data, _ := json.Marshal(frame)
-			if writeErr := conn.Write(ctx, websocket.MessageText, data); writeErr != nil {
-				return nil
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("read pipe: %w", err)
-		}
-	}
-}
-
-// streamViaCapture falls back to polling capture-pane at ~15fps.
+// streamViaCapture polls capture-pane at ~15fps.
 func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(66 * time.Millisecond)
 	defer ticker.Stop()
@@ -158,27 +70,11 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 	}
 }
 
-// sendCaptureFrame sends a single capture-pane snapshot.
-func (ps *PaneStreamer) sendCaptureFrame(ctx context.Context, conn *websocket.Conn) {
-	content, cols, rows := ps.capturePaneContent()
-	if content == "" {
-		return
-	}
-	frame := PaneFrame{
-		Type:    "frame",
-		Content: content,
-		Cols:    cols,
-		Rows:    rows,
-	}
-	data, _ := json.Marshal(frame)
-	conn.Write(ctx, websocket.MessageText, data)
-}
-
-// capturePaneContent snapshots the pane using tmux capture-pane.
+// capturePaneContent snapshots the pane using tmux capture-pane with ANSI codes preserved.
 func (ps *PaneStreamer) capturePaneContent() (content string, cols, rows int) {
-	// Capture without -e (no escape sequences) for clean text output.
-	// tmux-specific ANSI codes don't translate well to xterm.js.
-	cmd := exec.Command("tmux", "capture-pane", "-t", ps.target, "-p")
+	// Capture with -e to preserve ANSI escape sequences (colors, formatting).
+	// The phone's xterm.js renders these natively.
+	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", 0, 0
