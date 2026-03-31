@@ -140,17 +140,13 @@ func (d *Daemon) deliver(agentID string, msg Message) error {
 
 // tmuxDeliver is the default deliverFn that sends text via tmux send-keys.
 func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
-	// Prefer pane ID (works for split panes), fall back to session name
-	target := agent.PaneID
+	target := agent.Session
 	if target == "" {
-		target = agent.Session
-		if target == "" {
-			target = "ws/" + agent.ID
-		}
+		target = "ws/" + agent.ID
 	}
 
-	// Verify the target pane exists before sending
-	check := exec.Command("tmux", "display-message", "-t", target, "-p", "#{pane_id}")
+	// Verify the target session exists before sending
+	check := exec.Command("tmux", "has-session", "-t", target)
 	if err := check.Run(); err != nil {
 		return fmt.Errorf("pane %q not reachable for agent %q: %w", target, agent.ID, err)
 	}

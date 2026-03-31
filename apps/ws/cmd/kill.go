@@ -55,9 +55,10 @@ var killCmd = &cobra.Command{
 		}
 
 		for _, node := range removed {
-			// Kill tmux session
-			tmuxKill := exec.Command("tmux", "kill-session", "-t", node.Session)
-			tmuxKill.Run()
+			// Kill this workstream's tmux session
+			if node.Session != "" {
+				exec.Command("tmux", "kill-session", "-t", node.Session).Run()
+			}
 
 			// Remove git worktree
 			if node.Type == core.NodeTypeLocal {

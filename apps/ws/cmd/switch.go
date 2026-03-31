@@ -34,23 +34,16 @@ var switchCmd = &cobra.Command{
 			}
 		}
 
-		// Prefer PaneID for split panes, fall back to session
-		target := node.PaneID
-		if target == "" {
-			target = node.Session
-		}
-
-		// If inside tmux, switch client (resolves pane IDs to their session automatically).
-		// Otherwise attach to the session.
+		// If inside tmux, switch client. Otherwise attach to the session.
 		if os.Getenv("TMUX") != "" {
-			tmux := exec.Command("tmux", "switch-client", "-t", target)
+			tmux := exec.Command("tmux", "switch-client", "-t", node.Session)
 			tmux.Stdin = os.Stdin
 			tmux.Stdout = os.Stdout
 			tmux.Stderr = os.Stderr
 			return tmux.Run()
 		}
 
-		tmux := exec.Command("tmux", "attach-session", "-t", target)
+		tmux := exec.Command("tmux", "attach-session", "-t", node.Session)
 		tmux.Stdin = os.Stdin
 		tmux.Stdout = os.Stdout
 		tmux.Stderr = os.Stderr

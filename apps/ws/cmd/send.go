@@ -31,13 +31,9 @@ For other agents, uses tmux send-keys as a fallback.`,
 			return fmt.Errorf("workstream %q not found", name)
 		}
 
-		// Prefer PaneID for split-pane workstreams, fall back to Session
-		target := node.PaneID
+		target := node.Session
 		if target == "" {
-			target = node.Session
-			if target == "" {
-				target = "ws/" + name
-			}
+			target = "ws/" + name
 		}
 		tmuxSend := exec.Command("tmux", "send-keys", "-t", target, message, "Enter")
 		if out, err := tmuxSend.CombinedOutput(); err != nil {

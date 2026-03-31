@@ -26,32 +26,45 @@ func wsBin() string {
 
 var addAgent string
 var addTask string
+var addBranch string
+var addParent string
 
 var addCmd = &cobra.Command{
 	Use:   "add <name>",
 	Short: "Create a new workstream",
 	Long: `Create a new workstream backed by a git worktree and tmux session.
 
-Use slash-separated names to nest workstreams:
-  ws add auth --agent amp --task "Implement JWT auth"
-  ws add auth/oauth --agent amp --task "Add OAuth2 support"
+Nest workstreams using --parent or slash-separated names:
+  ws add auth --task "Implement JWT auth"
+  ws add oauth --parent auth --task "Add OAuth2 support"
+  ws add auth/oauth --task "Add OAuth2 support"
 
-The parent is inferred from the slash-separated name.`,
+Children get their own tmux session, worktree, and branch (forked from
+the parent's branch). They inherit the parent's visual theme.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		socketPath := relay.DefaultSocketPath()
+
+		// Resolve parent: --parent flag vs slash-separated name
+		if addParent != "" && strings.Contains(name, "/") {
+			return fmt.Errorf("cannot use --parent with a slash-separated name; use one or the other")
+		}
+		if addParent != "" {
+			// --parent flag: construct the full ID
+			name = addParent + "/" + name
+		}
 
 		// Auto-start daemon if not running
 		if err := ensureDaemon(socketPath); err != nil {
 			return err
 		}
 
-		return createWorkstream(name, addAgent, addTask, socketPath)
+		return createWorkstream(name, addAgent, addTask, addBranch, socketPath)
 	},
 }
 
-func createWorkstream(name, agent, task, socketPath string) error {
+func createWorkstream(name, agent, task, branchOverride, socketPath string) error {
 	tree, err := core.LoadTree(core.DefaultStatePath())
 	if err != nil {
 		return err
@@ -79,16 +92,29 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		parentID = strings.Join(parts[:len(parts)-1], "/")
 	}
 
-	// Determine branch and worktree path.
-	// Use the parent's WorkDir as the git repo base when spawning children
-	// (the daemon's cwd is not a git repo). For root workstreams, use the
-	// caller's cwd since `ws add` is run from inside the repo.
-	branch := "ws-" + strings.ReplaceAll(name, "/", "-")
-	var repoDir string
+	// Validate parent exists when specified
+	var parentNode *core.Node
 	if parentID != "" {
-		if parentNode, exists := tree.Nodes[parentID]; exists {
-			repoDir = parentNode.WorkDir
+		var exists bool
+		parentNode, exists = tree.Nodes[parentID]
+		if !exists {
+			return fmt.Errorf("parent workstream %q not found", parentID)
 		}
+	}
+
+	// Determine branch name
+	var branch string
+	if branchOverride != "" {
+		branch = branchOverride
+	} else {
+		branch = "ws-" + strings.ReplaceAll(name, "/", "-")
+	}
+
+	// Determine repo dir: use parent's WorkDir for children (the daemon's cwd
+	// may not be a git repo), caller's cwd for root workstreams.
+	var repoDir string
+	if parentNode != nil {
+		repoDir = parentNode.WorkDir
 	}
 	if repoDir == "" {
 		repoDir, _ = os.Getwd()
@@ -98,17 +124,51 @@ func createWorkstream(name, agent, task, socketPath string) error {
 	worktreeName := strings.ReplaceAll(name, "/", "-")
 	worktreePath := filepath.Join(filepath.Dir(repoDir), worktreeName)
 
-	// Prune stale worktree registrations (e.g. directory was deleted but git still tracks it)
+	// Prune stale worktree registrations
 	gitPrune := exec.Command("git", "worktree", "prune")
 	gitPrune.Dir = repoDir
 	gitPrune.CombinedOutput()
 
-	// If the worktree directory already exists, reuse it
+	// Create the worktree
 	if _, statErr := os.Stat(worktreePath); statErr == nil {
-		// Directory exists — just make sure it's a valid git worktree
 		log.Printf("[ws add] reusing existing worktree at %s", worktreePath)
+	} else if branchOverride != "" {
+		// User specified an existing branch — validate before creating worktree
+		verify := exec.Command("git", "rev-parse", "--verify", "refs/heads/"+branch)
+		verify.Dir = repoDir
+		if _, err := verify.CombinedOutput(); err != nil {
+			verifyRemote := exec.Command("git", "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+			verifyRemote.Dir = repoDir
+			if _, err2 := verifyRemote.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("branch %q does not exist locally or on origin\n"+
+					"Create it first with: git branch %s\n"+
+					"Or check remote branches with: git branch -r", branch, branch)
+			}
+		}
+		gitAdd := exec.Command("git", "worktree", "add", worktreePath, branch)
+		gitAdd.Dir = repoDir
+		if out, err := gitAdd.CombinedOutput(); err != nil {
+			errMsg := string(out)
+			if strings.Contains(errMsg, "already checked out") {
+				return fmt.Errorf("branch %q is already checked out in another worktree\n%s",
+					branch, strings.TrimSpace(errMsg))
+			}
+			return fmt.Errorf("git worktree add: %s", errMsg)
+		}
+	} else if parentNode != nil {
+		// Child: branch off the parent's branch
+		gitAdd := exec.Command("git", "worktree", "add", worktreePath, "-b", branch, parentNode.Branch)
+		gitAdd.Dir = repoDir
+		if _, err := gitAdd.CombinedOutput(); err != nil {
+			// Fall back to using existing branch
+			gitAdd = exec.Command("git", "worktree", "add", worktreePath, branch)
+			gitAdd.Dir = repoDir
+			if out2, err2 := gitAdd.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("git worktree add: %s", string(out2))
+			}
+		}
 	} else {
-		// Create git worktree — try new branch, then existing branch
+		// Root: branch off HEAD
 		gitAdd := exec.Command("git", "worktree", "add", worktreePath, "-b", branch)
 		gitAdd.Dir = repoDir
 		if _, err := gitAdd.CombinedOutput(); err != nil {
@@ -122,86 +182,59 @@ func createWorkstream(name, agent, task, socketPath string) error {
 
 	absPath := worktreePath
 
-	// tmux session name
+	// Every workstream gets its own tmux session
 	sessionName := "ws/" + name
 
-	// Determine if this is a child — if so, split a pane in the parent's session
-	var paneID string
-	if parentID != "" {
-		parentNode, exists := tree.Nodes[parentID]
-		if !exists {
-			return fmt.Errorf("parent workstream %q not found", parentID)
+	// Create or reuse tmux session
+	var agentPaneID string
+	checkSession := exec.Command("tmux", "has-session", "-t", sessionName)
+	if checkSession.Run() == nil {
+		// Session exists — get its first pane ID
+		getPaneCmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
+		if out, err := getPaneCmd.Output(); err == nil {
+			agentPaneID = strings.TrimSpace(strings.Split(string(out), "\n")[0])
 		}
-		// Split a pane in the parent's tmux session, capturing the new pane ID
-		splitCmd := exec.Command("tmux", "split-window", "-d", "-P", "-F", "#{pane_id}",
-			"-t", parentNode.Session,
-			"-c", absPath,
-			fmt.Sprintf("%s agent-run --id %s --agent %s --socket %s --parent %s",
-				wsBin(), name, agent, socketPath, parentID))
-		out, err := splitCmd.CombinedOutput()
+		log.Printf("[ws add] reusing existing tmux session %s (pane %s)", sessionName, agentPaneID)
+	} else {
+		tmuxNew := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", absPath,
+			"-P", "-F", "#{pane_id}")
+		out, err := tmuxNew.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("tmux split-window: %s", string(out))
+			return fmt.Errorf("tmux new-session: %s", string(out))
 		}
-		paneID = strings.TrimSpace(string(out))
+		agentPaneID = strings.TrimSpace(string(out))
+	}
+
+	// Split into agent (left, 65%) and terminal (right, 35%)
+	splitCmd := exec.Command("tmux", "split-window", "-h", "-d",
+		"-t", agentPaneID,
+		"-c", absPath,
+		"-l", "35%")
+	splitCmd.CombinedOutput()
+
+	// Launch agent-run in the left pane
+	if agent != "" {
+		agentRunArgs := fmt.Sprintf("%s agent-run --id %s --agent %s --socket %s",
+			wsBin(), name, agent, socketPath)
+		if parentID != "" {
+			agentRunArgs += fmt.Sprintf(" --parent %s", parentID)
+		}
+		tmuxSend := exec.Command("tmux", "send-keys", "-t", agentPaneID, agentRunArgs, "Enter")
+		if out, err := tmuxSend.CombinedOutput(); err != nil {
+			return fmt.Errorf("tmux send-keys: %s", string(out))
+		}
+
 		// Inject initial task after agent starts
 		if task != "" {
-			waitForPane(paneID)
-			taskSend := exec.Command("tmux", "send-keys", "-t", paneID, task, "Enter")
+			waitForPane(agentPaneID)
+			taskSend := exec.Command("tmux", "send-keys", "-t", agentPaneID, task, "Enter")
 			taskSend.CombinedOutput()
-		}
-	} else {
-		// Root workstream — create or reuse tmux session
-		checkSession := exec.Command("tmux", "has-session", "-t", sessionName)
-		if checkSession.Run() == nil {
-			// Session exists — get its pane ID
-			getPaneCmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
-			if out, err := getPaneCmd.Output(); err == nil {
-				paneID = strings.TrimSpace(strings.Split(string(out), "\n")[0])
-			}
-			log.Printf("[ws add] reusing existing tmux session %s (pane %s)", sessionName, paneID)
-		} else {
-			tmuxNew := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "-c", absPath,
-				"-P", "-F", "#{pane_id}")
-			out, err := tmuxNew.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("tmux new-session: %s", string(out))
-			}
-			paneID = strings.TrimSpace(string(out))
-		}
-
-		// Split into agent (left, 65%) and terminal (right, 35%)
-		// The initial pane becomes the agent pane; split-window creates the terminal pane
-		splitCmd := exec.Command("tmux", "split-window", "-h", "-d",
-			"-t", paneID,
-			"-c", absPath,
-			"-l", "35%")
-		splitCmd.CombinedOutput()
-
-		// Launch agent-run in the left pane (the original pane)
-		if agent != "" {
-			agentRunCmd := fmt.Sprintf("%s agent-run --id %s --agent %s --socket %s",
-				wsBin(), name, agent, socketPath)
-			tmuxSend := exec.Command("tmux", "send-keys", "-t", paneID, agentRunCmd, "Enter")
-			if out, err := tmuxSend.CombinedOutput(); err != nil {
-				return fmt.Errorf("tmux send-keys: %s", string(out))
-			}
-
-			// Inject initial task after agent starts
-			if task != "" {
-				waitForPane(paneID)
-				taskSend := exec.Command("tmux", "send-keys", "-t", paneID, task, "Enter")
-				taskSend.CombinedOutput()
-			}
 		}
 	}
 
-	// Assign a theme — children inherit from parent, roots get a new one
+	// Assign theme — children inherit parent's, roots get a new one
 	var theme core.WorkstreamTheme
-	var actualSession string // the tmux session this workstream lives in
-
-	if parentID != "" {
-		// Child: inherit parent's theme and session
-		parentNode := tree.Nodes[parentID]
+	if parentNode != nil {
 		if parentNode.Shader != "" {
 			theme = core.ThemeByShader(parentNode.Shader)
 		} else if parentNode.Color != "" {
@@ -209,36 +242,22 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		} else {
 			theme = core.AssignTheme(len(tree.Nodes))
 		}
-		actualSession = parentNode.Session
 	} else {
-		// Root: assign a new theme
 		theme = core.AssignTheme(len(tree.Nodes))
-		actualSession = sessionName
 	}
 
-	// Apply tmux pane styling — border color + background tint
-	if paneID != "" {
-		// Enable border status line on the session
-		exec.Command("tmux", "set", "-t", actualSession, "pane-border-status", "top").Run()
-		exec.Command("tmux", "set", "-p", "-t", paneID, "pane-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
-		exec.Command("tmux", "set", "-p", "-t", paneID, "pane-active-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
-		// Background tint for visual identity
-		exec.Command("tmux", "select-pane", "-t", paneID, "-P", fmt.Sprintf("bg=%s", theme.Tint)).Run()
-	}
-
-	// For root workstreams, also apply tint to the terminal pane (right side)
-	if parentID == "" {
-		listPanes := exec.Command("tmux", "list-panes", "-t", actualSession, "-F", "#{pane_id}")
-		if out, err := listPanes.Output(); err == nil {
-			panes := strings.Split(strings.TrimSpace(string(out)), "\n")
-			for _, p := range panes {
-				p = strings.TrimSpace(p)
-				if p != "" && p != paneID {
-					exec.Command("tmux", "select-pane", "-t", p, "-P", fmt.Sprintf("bg=%s", theme.Tint)).Run()
-					exec.Command("tmux", "set", "-p", "-t", p, "pane-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
-					exec.Command("tmux", "set", "-p", "-t", p, "pane-active-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
-				}
+	// Apply tmux pane styling to all panes in this session
+	exec.Command("tmux", "set", "-t", sessionName, "pane-border-status", "top").Run()
+	listPanes := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_id}")
+	if out, err := listPanes.Output(); err == nil {
+		for _, p := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
 			}
+			exec.Command("tmux", "set", "-p", "-t", p, "pane-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+			exec.Command("tmux", "set", "-p", "-t", p, "pane-active-border-style", fmt.Sprintf("fg=%s", theme.Border)).Run()
+			exec.Command("tmux", "select-pane", "-t", p, "-P", fmt.Sprintf("bg=%s", theme.Tint)).Run()
 		}
 	}
 
@@ -252,8 +271,7 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		Status:    core.StatusRunning,
 		Agent:     agent,
 		WorkDir:   absPath,
-		Session:   actualSession, // children live in parent's session
-		PaneID:    paneID,
+		Session:   sessionName,
 		Color:     theme.Border,
 		Shader:    theme.Shader,
 		CreatedAt: time.Now(),
@@ -278,7 +296,10 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		fmt.Printf("  Agent:     %s\n", agent)
 	}
 	if parentID != "" {
-		fmt.Printf("  Parent:    %s (split pane)\n", parentID)
+		fmt.Printf("  Parent:    %s\n", parentID)
+		if parentNode != nil {
+			fmt.Printf("  Forked:    %s\n", parentNode.Branch)
+		}
 	}
 	fmt.Printf("  Theme:     %s (border: %s)\n", theme.Label, theme.Border)
 
@@ -287,19 +308,14 @@ func createWorkstream(name, agent, task, socketPath string) error {
 		applyShader(node.Shader)
 	}
 
-	target := node.PaneID
-	if target == "" {
-		target = node.Session
-	}
-
 	if os.Getenv("TMUX") != "" {
-		tmuxSwitch := exec.Command("tmux", "switch-client", "-t", target)
+		tmuxSwitch := exec.Command("tmux", "switch-client", "-t", sessionName)
 		tmuxSwitch.Stdin = os.Stdin
 		tmuxSwitch.Stdout = os.Stdout
 		tmuxSwitch.Stderr = os.Stderr
 		tmuxSwitch.Run()
 	} else {
-		tmuxAttach := exec.Command("tmux", "attach-session", "-t", node.Session)
+		tmuxAttach := exec.Command("tmux", "attach-session", "-t", sessionName)
 		tmuxAttach.Stdin = os.Stdin
 		tmuxAttach.Stdout = os.Stdout
 		tmuxAttach.Stderr = os.Stderr
@@ -351,7 +367,9 @@ func ensureDaemon(socketPath string) error {
 }
 
 func init() {
-	addCmd.Flags().StringVarP(&addAgent, "agent", "a", "amp", "Agent to launch (amp, claude, codex)")
+	addCmd.Flags().StringVarP(&addAgent, "agent", "a", "claude", "Agent to launch (claude, amp, codex)")
 	addCmd.Flags().StringVarP(&addTask, "task", "t", "", "Task description for the agent")
+	addCmd.Flags().StringVarP(&addBranch, "branch", "b", "", "Use an existing git branch (instead of creating ws-<name>)")
+	addCmd.Flags().StringVarP(&addParent, "parent", "p", "", "Parent workstream (child branches off parent's branch)")
 	rootCmd.AddCommand(addCmd)
 }

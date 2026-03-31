@@ -6,8 +6,7 @@ vars:
 tasks:
   build:
     desc: Build all CLIs
-    cmds:
-      - go build -o {{.DIST}}/ws ./apps/ws
+    deps: [build:ws, build:wt]
 
   build:ws:
     desc: Build ws CLI
@@ -20,12 +19,22 @@ tasks:
     generates:
       - "{{.DIST}}/ws"
 
+  build:wt:
+    desc: Build wt CLI
+    cmds:
+      - go build -o {{.DIST}}/wt ./apps/wt
+    sources:
+      - apps/wt/**/*.go
+    generates:
+      - "{{.DIST}}/wt"
+
   test:
     desc: Test all modules
     cmds:
       - cd libs/core && go test ./...
       - cd libs/relay && go test ./...
       - cd apps/ws && go test ./...
+      - cd apps/wt && go test ./...
 
   lint:
     desc: Lint all modules
@@ -33,6 +42,7 @@ tasks:
       - cd libs/core && golangci-lint run ./...
       - cd libs/relay && golangci-lint run ./...
       - cd apps/ws && golangci-lint run ./...
+      - cd apps/wt && golangci-lint run ./...
 
   fmt:
     desc: Format all Go files
@@ -44,17 +54,21 @@ tasks:
     cmds:
       - go work sync
       - cd apps/ws && go mod tidy
+      - cd apps/wt && go mod tidy
       - cd libs/core && go mod tidy
       - cd libs/relay && go mod tidy
 
   install:
-    desc: Install ws to ~/bin
-    deps: [build:ws]
+    desc: Install ws and wt to ~/bin
+    deps: [build]
     cmds:
       - cp {{.DIST}}/ws ~/bin/ws
       - xattr -c ~/bin/ws
       - codesign -s - -f ~/bin/ws
-      - echo "Installed ws to ~/bin/ws"
+      - cp {{.DIST}}/wt ~/bin/wt
+      - xattr -c ~/bin/wt
+      - codesign -s - -f ~/bin/wt
+      - echo "Installed ws and wt to ~/bin/"
 
   clean:
     desc: Remove build artifacts

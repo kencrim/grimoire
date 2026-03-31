@@ -86,12 +86,9 @@ var daemonStartCmd = &cobra.Command{
 		} else {
 			rehydrated := 0
 			for _, node := range tree.Nodes {
-				// Check if the tmux session/pane is still alive
+				// Check if the tmux session is still alive
 				alive := false
-				if node.PaneID != "" {
-					check := exec.Command("tmux", "display-message", "-t", node.PaneID, "-p", "")
-					alive = check.Run() == nil
-				} else if node.Session != "" {
+				if node.Session != "" {
 					check := exec.Command("tmux", "has-session", "-t", node.Session)
 					alive = check.Run() == nil
 				}
@@ -103,7 +100,6 @@ var daemonStartCmd = &cobra.Command{
 						Agent:        node.Agent,
 						WorktreePath: node.WorkDir,
 						Session:      node.Session,
-						PaneID:       node.PaneID,
 						Status:       "alive",
 					})
 					rehydrated++
@@ -122,7 +118,7 @@ var daemonStartCmd = &cobra.Command{
 			childName := req.ParentID + "/" + req.Name
 			log.Printf("[daemon] spawn requested: %s (parent: %s)", childName, req.ParentID)
 
-			if err := createWorkstream(childName, "amp", req.Task, socketPath); err != nil {
+			if err := createWorkstream(childName, "claude", req.Task, "", socketPath); err != nil {
 				return relay.SpawnResponse{}, err
 			}
 
@@ -149,10 +145,8 @@ var daemonStartCmd = &cobra.Command{
 
 			var killedIDs []string
 			for _, node := range removed {
-				// Kill tmux pane (prefer PaneID for split panes) or session
-				if node.PaneID != "" {
-					exec.Command("tmux", "kill-pane", "-t", node.PaneID).Run()
-				} else {
+				// Kill this workstream's tmux session
+				if node.Session != "" {
 					exec.Command("tmux", "kill-session", "-t", node.Session).Run()
 				}
 

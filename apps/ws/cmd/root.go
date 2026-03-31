@@ -19,7 +19,7 @@ var rootCmd = &cobra.Command{
 (local) or a remote devpod. Each workstream gets its own tmux session
 with agents running inside it.
 
-  ws add auth --agent claude       Create a workstream
+  ws add auth                       Create a workstream (uses Claude Code)
   ws add auth/oauth --agent amp    Nest under an existing workstream
   ws list                          Show the workstream tree
   ws switch auth                   Switch to a workstream's tmux session
@@ -92,20 +92,15 @@ Running ws with no subcommand opens an interactive workstream picker.`,
 		}
 
 		// Switch to the workstream
-		target := node.PaneID
-		if target == "" {
-			target = node.Session
-		}
-
 		if os.Getenv("TMUX") != "" {
-			tmux := exec.Command("tmux", "switch-client", "-t", target)
+			tmux := exec.Command("tmux", "switch-client", "-t", node.Session)
 			tmux.Stdin = os.Stdin
 			tmux.Stdout = os.Stdout
 			tmux.Stderr = os.Stderr
 			return tmux.Run()
 		}
 
-		tmux := exec.Command("tmux", "attach-session", "-t", target)
+		tmux := exec.Command("tmux", "attach-session", "-t", node.Session)
 		tmux.Stdin = os.Stdin
 		tmux.Stdout = os.Stdout
 		tmux.Stderr = os.Stderr

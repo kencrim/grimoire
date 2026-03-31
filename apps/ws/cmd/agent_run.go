@@ -29,7 +29,7 @@ var agentRunCmd = &cobra.Command{
 			return fmt.Errorf("--id and --socket are required")
 		}
 		if agentType == "" {
-			agentType = "amp"
+			agentType = "claude"
 		}
 
 		// Discover our own tmux pane ID via TMUX_PANE env var
@@ -107,7 +107,7 @@ var agentRunCmd = &cobra.Command{
 
 func init() {
 	agentRunCmd.Flags().String("id", "", "Workstream ID")
-	agentRunCmd.Flags().String("agent", "amp", "Agent type (amp, claude, codex)")
+	agentRunCmd.Flags().String("agent", "claude", "Agent type (claude, amp, codex)")
 	agentRunCmd.Flags().String("task", "", "Task description")
 	agentRunCmd.Flags().String("socket", "", "Daemon socket path")
 	agentRunCmd.Flags().String("parent", "", "Parent workstream ID")

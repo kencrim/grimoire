@@ -26,13 +26,9 @@ var logsCmd = &cobra.Command{
 			return fmt.Errorf("workstream %q not found", name)
 		}
 
-		// Prefer PaneID for split panes, fall back to session
-		target := node.PaneID
+		target := node.Session
 		if target == "" {
-			target = node.Session
-			if target == "" {
-				target = "ws/" + name
-			}
+			target = "ws/" + name
 		}
 
 		// Capture last 50 lines of the pane
