@@ -5,3 +5,10 @@ dist/
 .claude/
 mise.toml
 /ws
+
+# Mobile app build artifacts
+apps/ws/mobile/node_modules/
+apps/ws/mobile/ios/
+apps/ws/mobile/android/
+apps/ws/mobile/.expo/
+apps/ws/mobile/dist/

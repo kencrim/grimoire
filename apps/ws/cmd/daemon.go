@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kencrim/grimoire/libs/core"
 	"github.com/kencrim/grimoire/libs/relay"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +30,7 @@ var daemonStartCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		socketPath := relay.DefaultSocketPath()
 		foreground, _ := cmd.Flags().GetBool("foreground")
+		wsPort, _ := cmd.Flags().GetInt("ws-port")
 
 		// Check if already running
 		conn, err := net.Dial("unix", socketPath)
@@ -39,7 +42,11 @@ var daemonStartCmd = &cobra.Command{
 		// If not foreground, re-exec ourselves in the background
 		if !foreground {
 			logFile, _ := os.Create(filepath.Join(os.TempDir(), "ws-daemon.log"))
-			bgCmd := exec.Command(wsBin(), "daemon", "start", "--foreground")
+			bgArgs := []string{"daemon", "start", "--foreground"}
+			if wsPort > 0 {
+				bgArgs = append(bgArgs, fmt.Sprintf("--ws-port=%d", wsPort))
+			}
+			bgCmd := exec.Command(wsBin(), bgArgs...)
 			bgCmd.Stdout = logFile
 			bgCmd.Stderr = logFile
 			bgCmd.Stdin = nil
@@ -54,6 +61,9 @@ var daemonStartCmd = &cobra.Command{
 				if err == nil {
 					c.Close()
 					fmt.Printf("ws daemon started (pid %d)\n", bgCmd.Process.Pid)
+					if wsPort > 0 {
+						fmt.Printf("WebSocket server on port %d\n", wsPort)
+					}
 					return nil
 				}
 			}
@@ -172,12 +182,48 @@ var daemonStartCmd = &cobra.Command{
 			}, nil
 		})
 
+		// Start WebSocket server if port specified
+		var wsSrv *relay.WSServer
+		var disco *relay.Discovery
+		if wsPort > 0 {
+			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
+			addr := fmt.Sprintf("0.0.0.0:%d", wsPort)
+			go func() {
+				if err := wsSrv.Listen(addr); err != nil {
+					log.Printf("[daemon] WebSocket server error: %v", err)
+				}
+			}()
+
+			// Persist WS port so `ws daemon connect` can read it
+			os.WriteFile(relay.WSPortPath(), []byte(fmt.Sprintf("%d", wsPort)), 0o644)
+
+			// Start mDNS/Bonjour advertisement + Tailscale detection
+			disco = relay.NewDiscovery(wsPort, wsSrv.Token())
+			if err := disco.StartMDNS(); err != nil {
+				log.Printf("[daemon] mDNS failed (non-fatal): %v", err)
+			}
+
+			// Persist Tailscale hostname for `ws daemon connect`
+			if tsHost := disco.TailscaleHost(); tsHost != "" {
+				os.WriteFile(relay.TailscaleHostPath(), []byte(tsHost), 0o644)
+			}
+
+			log.Printf("[daemon] WebSocket server on port %d", wsPort)
+			log.Printf("[daemon] Token: %s...", wsSrv.Token()[:8])
+		}
+
 		// Handle shutdown
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			<-sigCh
 			log.Println("[daemon] shutting down...")
+			if disco != nil {
+				disco.Close()
+			}
+			if wsSrv != nil {
+				wsSrv.Close()
+			}
 			daemon.Close()
 			os.Remove(socketPath)
 			os.Exit(0)
@@ -236,11 +282,117 @@ var daemonStatusCmd = &cobra.Command{
 	},
 }
 
+var daemonConnectCmd = &cobra.Command{
+	Use:   "connect",
+	Short: "Show QR code and connection details for Grimoire Mobile",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check daemon is running
+		socketPath := relay.DefaultSocketPath()
+		conn, err := net.Dial("unix", socketPath)
+		if err != nil {
+			return fmt.Errorf("daemon is not running — start it with: ws daemon start --ws-port 8077")
+		}
+		conn.Close()
+
+		// Read saved token
+		tokenData, err := os.ReadFile(relay.TokenPath())
+		if err != nil {
+			return fmt.Errorf("no auth token found — was the daemon started with --ws-port?")
+		}
+		token := strings.TrimSpace(string(tokenData))
+
+		// Read saved WS port
+		portData, err := os.ReadFile(relay.WSPortPath())
+		if err != nil {
+			return fmt.Errorf("no WebSocket port found — was the daemon started with --ws-port?")
+		}
+		var port int
+		fmt.Sscanf(strings.TrimSpace(string(portData)), "%d", &port)
+		if port == 0 {
+			return fmt.Errorf("invalid WebSocket port")
+		}
+
+		// Detect IP addresses
+		var tailscaleIP string
+		var lanIPs []string
+
+		// Only trust Tailscale IP if the tunnel is actually up
+		if err := exec.Command("tailscale", "status", "--peers=false").Run(); err == nil {
+			if out, err := exec.Command("tailscale", "ip", "-4").Output(); err == nil {
+				tailscaleIP = strings.TrimSpace(string(out))
+			}
+		}
+
+		ifaces, _ := net.Interfaces()
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, _ := iface.Addrs()
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+					ip := ipnet.IP.String()
+					// Skip Tailscale IP and link-local from LAN list
+					if ip != tailscaleIP && !strings.HasPrefix(ip, "100.") {
+						lanIPs = append(lanIPs, ip)
+					}
+				}
+			}
+		}
+
+		// Pick the best address for the QR code (prefer LAN — phone is likely on same WiFi)
+		primaryIP := "localhost"
+		if len(lanIPs) > 0 {
+			primaryIP = lanIPs[0]
+		} else if tailscaleIP != "" {
+			primaryIP = tailscaleIP
+		}
+
+		uri := fmt.Sprintf("grimoire://%s:%d?token=%s", primaryIP, port, token)
+
+		// Generate QR code
+		qr, err := qrcode.New(uri, qrcode.Medium)
+		if err != nil {
+			return fmt.Errorf("QR code generation failed: %w", err)
+		}
+
+		// Print everything to stdout
+		fmt.Println()
+		fmt.Println("  Scan with Grimoire Mobile:")
+		fmt.Println()
+		fmt.Print(qr.ToSmallString(false))
+		fmt.Println()
+
+		// Read saved Tailscale hostname
+		var tailscaleHost string
+		if tsData, err := os.ReadFile(relay.TailscaleHostPath()); err == nil {
+			tailscaleHost = strings.TrimSpace(string(tsData))
+		}
+
+		if tailscaleHost != "" {
+			fmt.Printf("  Tailscale:  %s:%d\n", tailscaleHost, port)
+		} else if tailscaleIP != "" {
+			fmt.Printf("  Tailscale:  %s:%d\n", tailscaleIP, port)
+		}
+		for _, ip := range lanIPs {
+			fmt.Printf("  LAN:        %s:%d\n", ip, port)
+		}
+		fmt.Printf("  mDNS:       _grimoire._tcp (auto-discovered on LAN)\n")
+		fmt.Println()
+		fmt.Printf("  Token:      %s\n", token)
+		fmt.Println()
+
+		return nil
+	},
+}
+
 func init() {
 	daemonStartCmd.Flags().Bool("foreground", false, "Run in foreground (used internally)")
 	daemonStartCmd.Flags().MarkHidden("foreground")
+	daemonStartCmd.Flags().Int("ws-port", 0, "Port for WebSocket server (0 = disabled)")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonConnectCmd)
 	rootCmd.AddCommand(daemonCmd)
 }

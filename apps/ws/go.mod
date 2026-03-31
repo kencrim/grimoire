@@ -6,6 +6,7 @@ require (
 	github.com/kencrim/grimoire/libs/core v0.0.0-20260328182214-51dc263dfdc9
 	github.com/kencrim/grimoire/libs/relay v0.0.0-20260328204039-53eb46c508de
 	github.com/modelcontextprotocol/go-sdk v1.4.1
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
 )
 
