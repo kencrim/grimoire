@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Grimoire",
+    "slug": "grimoire-mobile",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "grimoire",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.grimoire.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Grimoire needs camera access to scan QR codes for daemon pairing.",
+        "NSLocalNetworkUsageDescription": "Grimoire uses local network to discover relay daemons.",
+        "NSBonjourServices": ["_grimoire._tcp."]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1e1e2e"
+      },
+      "package": "com.grimoire.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Grimoire needs camera access to scan QR codes for daemon pairing."
+        }
+      ]
+    ]
+  }
+}

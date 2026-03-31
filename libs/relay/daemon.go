@@ -232,6 +232,106 @@ type RegisterPayload struct {
 	WorkDir  string `json:"work_dir,omitempty"`
 }
 
+// HandleAction processes a single envelope and returns the response.
+// Used by both Unix socket and WebSocket handlers.
+func (d *Daemon) HandleAction(env Envelope) (any, error) {
+	switch env.Action {
+	case "send":
+		var msg Message
+		if err := json.Unmarshal(env.Payload, &msg); err != nil {
+			return nil, err
+		}
+		if err := d.Route(msg); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "delivered"}, nil
+
+	case "spawn":
+		var req SpawnRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return nil, err
+		}
+		if d.onSpawn == nil {
+			return nil, fmt.Errorf("no spawn handler configured")
+		}
+		return d.onSpawn(req)
+
+	case "status":
+		var req StatusRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return nil, err
+		}
+		if req.AgentID == "all" || req.AgentID == "" {
+			return d.ListAgents(), nil
+		}
+		d.mu.RLock()
+		defer d.mu.RUnlock()
+		if a, ok := d.agents[req.AgentID]; ok {
+			return AgentStatus{ID: a.ID, Status: a.Status, Agent: a.Agent}, nil
+		}
+		return nil, fmt.Errorf("agent %q not found", req.AgentID)
+
+	case "kill":
+		var req KillRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return nil, err
+		}
+		if d.onKill == nil {
+			return nil, fmt.Errorf("no kill handler configured")
+		}
+		kr, err := d.onKill(req)
+		if err != nil {
+			return nil, err
+		}
+		for _, killedID := range kr.Killed {
+			d.Unregister(killedID)
+		}
+		return kr, nil
+
+	case "register":
+		var reg RegisterPayload
+		if err := json.Unmarshal(env.Payload, &reg); err != nil {
+			return nil, err
+		}
+		d.mu.Lock()
+		if existing, ok := d.agents[reg.AgentID]; ok {
+			existing.Agent = reg.Agent
+			existing.ParentID = reg.ParentID
+			existing.Status = "alive"
+			if reg.PaneID != "" {
+				existing.PaneID = reg.PaneID
+			}
+			if reg.WorkDir != "" {
+				existing.WorktreePath = reg.WorkDir
+			}
+		} else {
+			d.agents[reg.AgentID] = &AgentHandle{
+				ID:           reg.AgentID,
+				ParentID:     reg.ParentID,
+				Agent:        reg.Agent,
+				WorktreePath: reg.WorkDir,
+				Session:      "ws/" + reg.AgentID,
+				PaneID:       reg.PaneID,
+				Status:       "alive",
+			}
+		}
+		d.mu.Unlock()
+		log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
+		return map[string]string{"status": "registered"}, nil
+
+	case "unregister":
+		var reg RegisterPayload
+		if err := json.Unmarshal(env.Payload, &reg); err != nil {
+			return nil, err
+		}
+		d.Unregister(reg.AgentID)
+		return map[string]string{"status": "unregistered"}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown action %q", env.Action)
+	}
+}
+
 func (d *Daemon) handleConn(conn net.Conn) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
@@ -246,106 +346,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 			return
 		}
 
-		var resp any
-		var err error
-
-		switch env.Action {
-		case "send":
-			var msg Message
-			if err = json.Unmarshal(env.Payload, &msg); err == nil {
-				err = d.Route(msg)
-			}
-			resp = map[string]string{"status": "delivered"}
-
-		case "spawn":
-			var req SpawnRequest
-			if err = json.Unmarshal(env.Payload, &req); err == nil {
-				if d.onSpawn != nil {
-					var sr SpawnResponse
-					sr, err = d.onSpawn(req)
-					resp = sr
-				} else {
-					err = fmt.Errorf("no spawn handler configured")
-				}
-			}
-
-		case "status":
-			var req StatusRequest
-			if err = json.Unmarshal(env.Payload, &req); err == nil {
-				if req.AgentID == "all" || req.AgentID == "" {
-					resp = d.ListAgents()
-				} else {
-					d.mu.RLock()
-					if a, ok := d.agents[req.AgentID]; ok {
-						resp = AgentStatus{ID: a.ID, Status: a.Status, Agent: a.Agent}
-					} else {
-						err = fmt.Errorf("agent %q not found", req.AgentID)
-					}
-					d.mu.RUnlock()
-				}
-			}
-
-		case "kill":
-			var req KillRequest
-			if err = json.Unmarshal(env.Payload, &req); err == nil {
-				if d.onKill != nil {
-					var kr KillResponse
-					kr, err = d.onKill(req)
-					if err == nil {
-						// Unregister all killed agents from in-memory map
-						for _, killedID := range kr.Killed {
-							d.Unregister(killedID)
-						}
-					}
-					resp = kr
-				} else {
-					err = fmt.Errorf("no kill handler configured")
-				}
-			}
-
-		case "register":
-			var reg RegisterPayload
-			if err = json.Unmarshal(env.Payload, &reg); err == nil {
-				d.mu.Lock()
-				if existing, ok := d.agents[reg.AgentID]; ok {
-					// Update existing handle
-					existing.Agent = reg.Agent
-					existing.ParentID = reg.ParentID
-					existing.Status = "alive"
-					if reg.PaneID != "" {
-						existing.PaneID = reg.PaneID
-					}
-					if reg.WorkDir != "" {
-						existing.WorktreePath = reg.WorkDir
-					}
-				} else {
-					// Create new handle
-					d.agents[reg.AgentID] = &AgentHandle{
-						ID:           reg.AgentID,
-						ParentID:     reg.ParentID,
-						Agent:        reg.Agent,
-						WorktreePath: reg.WorkDir,
-						Session:      "ws/" + reg.AgentID,
-						PaneID:       reg.PaneID,
-						Status:       "alive",
-					}
-				}
-				d.mu.Unlock()
-				log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
-				resp = map[string]string{"status": "registered"}
-			}
-
-		case "unregister":
-			var reg RegisterPayload
-			if err = json.Unmarshal(env.Payload, &reg); err == nil {
-				d.Unregister(reg.AgentID)
-				resp = map[string]string{"status": "unregistered"}
-			}
-
-		default:
-			err = fmt.Errorf("unknown action %q", env.Action)
-		}
-
+		resp, err := d.HandleAction(env)
 		if err != nil {
 			encoder.Encode(map[string]string{"error": err.Error()})
 		} else {
