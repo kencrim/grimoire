@@ -103,12 +103,14 @@ export function generateXtermHtml(): string {
     }
   };
 
+  var ESC = String.fromCharCode(27);
   const theme = ${themeJson};
 
   const term = new Terminal({
     fontSize: 12,
     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
     scrollback: 1000,
+    scrollSensitivity: 3,
     cursorBlink: true,
     cursorStyle: 'block',
     allowTransparency: true,
@@ -125,6 +127,14 @@ export function generateXtermHtml(): string {
     fitAddon.fit();
     sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
   }, 100);
+
+  // Pause live updates when user scrolls up to read history.
+  // Resume when they scroll back to the bottom.
+  var userScrolledUp = false;
+  term.onScroll(function() {
+    var buf = term.buffer.active;
+    userScrolledUp = (buf.viewportY < buf.baseY);
+  });
 
   // Character width ratio for monospace fonts (Menlo/Courier).
   // ~0.6 means each character is 60% of the font size in pixels.
@@ -208,6 +218,8 @@ export function generateXtermHtml(): string {
         case 'write':
           if (msg.data) {
             if (msg.cols && msg.rows) {
+              // Live update — skip if user is scrolled up reading history
+              if (userScrolledUp) break;
               if (msg.cols !== lastAutoCols) {
                 var cw = document.documentElement.clientWidth - 8;
                 var fs = Math.round(cw / (msg.cols * charWidthRatio));
@@ -216,12 +228,16 @@ export function generateXtermHtml(): string {
                 currentFontSize = fs;
                 term.options.fontSize = fs;
                 lastAutoCols = msg.cols;
+                // Recalculate rows for new font size — fill the full screen height
+                fitAddon.fit();
               }
-              if (term.cols !== msg.cols || term.rows !== msg.rows) {
-                term.resize(msg.cols, msg.rows);
+              // Match desktop cols but keep phone's natural row count
+              if (term.cols !== msg.cols) {
+                term.resize(msg.cols, term.rows);
               }
               term.write('\x1b[H\x1b[2J' + msg.data);
             } else {
+              // History or incremental frame — always write
               term.write(msg.data);
             }
           }

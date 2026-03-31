@@ -13,8 +13,8 @@ import (
 
 // PaneStreamer handles bidirectional terminal I/O for a tmux pane.
 type PaneStreamer struct {
-	target    string   // tmux pane ID (e.g. %5) or session name
-	prevLines []string // previous frame's lines for scroll detection
+	target        string   // tmux pane ID (e.g. %5) or session name
+	prevStripped  []string // previous frame's lines with ANSI stripped (for scroll comparison)
 }
 
 // PaneFrame is a captured terminal snapshot sent to the phone.
@@ -34,10 +34,35 @@ func NewPaneStreamer(target string) *PaneStreamer {
 }
 
 // StreamTo streams pane output over the WebSocket using capture-pane polling.
-// Each frame is a full snapshot of the pane content with ANSI escape sequences
-// preserved, so the phone gets an accurate viewport into the desktop terminal.
+// First sends the scrollback history so the phone can scroll up through past output,
+// then polls the visible pane at ~15fps for live updates.
 func (ps *PaneStreamer) StreamTo(ctx context.Context, conn *websocket.Conn) {
+	// Send scrollback history first — this fills xterm.js scrollback buffer
+	// so the user can scroll up through past output.
+	ps.sendHistory(ctx, conn)
+	// Then start live polling of the visible pane
 	ps.streamViaCapture(ctx, conn)
+}
+
+// sendHistory captures the tmux scrollback buffer and sends it as a single frame.
+// Sent without cols/rows so the phone writes it incrementally (no screen clear),
+// allowing the content to naturally flow into xterm.js scrollback.
+func (ps *PaneStreamer) sendHistory(ctx context.Context, conn *websocket.Conn) {
+	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p", "-S", "-1000")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+
+	// Send without cols/rows — the phone's JS treats frames without dimensions
+	// as incremental writes (no clear), so the content flows into scrollback.
+	frame := PaneFrame{
+		Type:     "frame",
+		Content:  string(out),
+		Scrolled: -1,
+	}
+	data, _ := json.Marshal(frame)
+	conn.Write(ctx, websocket.MessageText, data)
 }
 
 // streamViaCapture polls capture-pane at ~15fps.
@@ -61,12 +86,16 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 			lastContent = content
 
 			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+			stripped := make([]string, len(lines))
+			for i, l := range lines {
+				stripped[i] = stripAnsi(l)
+			}
 
 			scrolled := -1 // default: full snapshot (first frame or dimension change)
-			if ps.prevLines != nil && len(lines) == len(ps.prevLines) {
-				scrolled = ps.detectScroll(ps.prevLines, lines)
+			if ps.prevStripped != nil && len(stripped) == len(ps.prevStripped) {
+				scrolled = detectScroll(ps.prevStripped, stripped)
 			}
-			ps.prevLines = lines
+			ps.prevStripped = stripped
 
 			frame := PaneFrame{
 				Type:     "frame",
@@ -84,8 +113,9 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 }
 
 // detectScroll checks if newLines is a scrolled version of prevLines.
+// Both slices should have ANSI codes already stripped for reliable comparison.
 // Returns the number of lines scrolled off the top (0 = in-place change only).
-func (ps *PaneStreamer) detectScroll(prevLines, newLines []string) int {
+func detectScroll(prevLines, newLines []string) int {
 	n := len(newLines)
 
 	// Try offsets 1..maxCheck: if newLines[0:n-offset] matches prevLines[offset:n],
@@ -114,6 +144,38 @@ func (ps *PaneStreamer) detectScroll(prevLines, newLines []string) int {
 		}
 	}
 	return 0
+}
+
+// stripAnsi removes ANSI escape sequences from a string for comparison purposes.
+func stripAnsi(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\033' {
+			// Skip CSI sequences: ESC [ ... final_byte
+			if i+1 < len(s) && s[i+1] == '[' {
+				j := i + 2
+				for j < len(s) && s[j] >= 0x30 && s[j] <= 0x3F {
+					j++ // parameter bytes
+				}
+				for j < len(s) && s[j] >= 0x20 && s[j] <= 0x2F {
+					j++ // intermediate bytes
+				}
+				if j < len(s) {
+					j++ // final byte
+				}
+				i = j
+				continue
+			}
+			// Skip other ESC sequences (ESC + one byte)
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 // capturePaneContent snapshots the pane using tmux capture-pane with ANSI codes preserved.
