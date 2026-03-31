@@ -21,6 +21,7 @@ export interface PaneFrame {
   content: string;
   cols: number;
   rows: number;
+  scrolled: number; // -1 = full snapshot, 0 = in-place update, >0 = lines scrolled off top
 }
 
 export interface PaneInputMsg {

@@ -13,15 +13,17 @@ import (
 
 // PaneStreamer handles bidirectional terminal I/O for a tmux pane.
 type PaneStreamer struct {
-	target string // tmux pane ID (e.g. %5) or session name
+	target    string   // tmux pane ID (e.g. %5) or session name
+	prevLines []string // previous frame's lines for scroll detection
 }
 
 // PaneFrame is a captured terminal snapshot sent to the phone.
 type PaneFrame struct {
-	Type    string `json:"type"`    // frame
-	Content string `json:"content"` // ANSI-encoded terminal content
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
+	Type     string `json:"type"`     // frame
+	Content  string `json:"content"`  // ANSI-encoded terminal content
+	Cols     int    `json:"cols"`
+	Rows     int    `json:"rows"`
+	Scrolled int    `json:"scrolled"` // -1 = full snapshot, 0 = in-place update, >0 = lines scrolled off top
 }
 
 // NewPaneStreamer creates a streamer for a tmux pane.
@@ -39,6 +41,8 @@ func (ps *PaneStreamer) StreamTo(ctx context.Context, conn *websocket.Conn) {
 }
 
 // streamViaCapture polls capture-pane at ~15fps.
+// It detects when content scrolls (new lines at the bottom) and sends a scroll
+// offset so the phone can push old lines into xterm.js scrollback naturally.
 func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(66 * time.Millisecond)
 	defer ticker.Stop()
@@ -56,11 +60,20 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 			}
 			lastContent = content
 
+			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+
+			scrolled := -1 // default: full snapshot (first frame or dimension change)
+			if ps.prevLines != nil && len(lines) == len(ps.prevLines) {
+				scrolled = ps.detectScroll(ps.prevLines, lines)
+			}
+			ps.prevLines = lines
+
 			frame := PaneFrame{
-				Type:    "frame",
-				Content: content,
-				Cols:    cols,
-				Rows:    rows,
+				Type:     "frame",
+				Content:  content,
+				Cols:     cols,
+				Rows:     rows,
+				Scrolled: scrolled,
 			}
 			data, _ := json.Marshal(frame)
 			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
@@ -68,6 +81,39 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 			}
 		}
 	}
+}
+
+// detectScroll checks if newLines is a scrolled version of prevLines.
+// Returns the number of lines scrolled off the top (0 = in-place change only).
+func (ps *PaneStreamer) detectScroll(prevLines, newLines []string) int {
+	n := len(newLines)
+
+	// Try offsets 1..maxCheck: if newLines[0:n-offset] matches prevLines[offset:n],
+	// then 'offset' lines scrolled off the top.
+	maxCheck := 20
+	if maxCheck > n/2 {
+		maxCheck = n / 2
+	}
+
+	for offset := 1; offset <= maxCheck; offset++ {
+		match := true
+		// Check the overlapping region. Ignore the bottom 3 lines since
+		// status bars (Claude Code prompt line, etc.) change independently of scroll.
+		checkEnd := n - offset - 3
+		if checkEnd < 3 {
+			continue
+		}
+		for i := 0; i < checkEnd; i++ {
+			if newLines[i] != prevLines[i+offset] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return offset
+		}
+	}
+	return 0
 }
 
 // capturePaneContent snapshots the pane using tmux capture-pane with ANSI codes preserved.

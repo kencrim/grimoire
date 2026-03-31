@@ -14,7 +14,7 @@ interface ToWebView {
 
 // Messages sent from the WebView to React Native
 export interface FromWebView {
-  type: 'input' | 'ready' | 'fit' | 'special';
+  type: 'input' | 'ready' | 'special';
   data?: string;
   cols?: number;
   rows?: number;
@@ -83,7 +83,7 @@ export function generateXtermHtml(): string {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: ${xtermTheme.background}; }
-  #terminal { width: 100%; height: 100%; }
+  #terminal { width: 100%; height: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
   .xterm { padding: 4px; }
 </style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
@@ -94,12 +94,21 @@ export function generateXtermHtml(): string {
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script>
 (function() {
+  // Surface JS errors to React Native console
+  window.onerror = function(msg, url, line) {
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'error', data: msg + ' (line ' + line + ')'
+      }));
+    }
+  };
+
   const theme = ${themeJson};
 
   const term = new Terminal({
     fontSize: 12,
     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-    scrollback: 2000,
+    scrollback: 1000,
     cursorBlink: true,
     cursorStyle: 'block',
     allowTransparency: true,
@@ -111,26 +120,22 @@ export function generateXtermHtml(): string {
   term.loadAddon(fitAddon);
   term.open(document.getElementById('terminal'));
 
-  // Initial fit
+  // Initial fit — used only until the first server frame arrives with dimensions
   setTimeout(function() {
     fitAddon.fit();
     sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
   }, 100);
 
-  // Note: we do NOT re-fit on window resize. The server sends the desktop's
-  // terminal dimensions with each frame, and we resize to match. The phone
-  // is a viewport into the desktop terminal, not an independent terminal.
+  // Character width ratio for monospace fonts (Menlo/Courier).
+  // ~0.6 means each character is 60% of the font size in pixels.
+  var charWidthRatio = 0.602;
 
-  // Track whether the user has scrolled up — if so, don't auto-scroll to bottom
-  var userScrolledUp = false;
-  term.onScroll(function() {
-    var viewport = term.buffer.active;
-    var atBottom = viewport.baseY + term.rows >= viewport.length;
-    userScrolledUp = !atBottom;
-  });
+  // Font size state — auto-calculated on first frame or when desktop cols change.
+  // Pinch-to-zoom overrides this until the desktop dimensions change.
+  var currentFontSize = 12;
+  var lastAutoCols = 0;
 
   // Pinch-to-zoom for font size
-  var currentFontSize = 12;
   var pinchStartDist = 0;
   var pinchStartFontSize = 12;
 
@@ -150,7 +155,7 @@ export function generateXtermHtml(): string {
       var dist = Math.sqrt(dx * dx + dy * dy);
       var scale = dist / pinchStartDist;
       var newSize = Math.round(pinchStartFontSize * scale);
-      newSize = Math.max(8, Math.min(24, newSize));
+      newSize = Math.max(4, Math.min(24, newSize));
       if (newSize !== currentFontSize) {
         currentFontSize = newSize;
         term.options.fontSize = newSize;
@@ -165,7 +170,6 @@ export function generateXtermHtml(): string {
 
   // Handle special keys
   term.onKey(function(ev) {
-    // Map special keys to tmux key names
     var key = ev.domEvent.key;
     var ctrl = ev.domEvent.ctrlKey;
     var special = null;
@@ -204,22 +208,21 @@ export function generateXtermHtml(): string {
         case 'write':
           if (msg.data) {
             if (msg.cols && msg.rows) {
-              // Full snapshot: resize xterm to match the desktop terminal,
-              // then clear and write. The phone is a viewport — pinch to zoom.
+              if (msg.cols !== lastAutoCols) {
+                var cw = document.documentElement.clientWidth - 8;
+                var fs = Math.round(cw / (msg.cols * charWidthRatio));
+                if (fs < 6) fs = 6;
+                if (fs > 14) fs = 14;
+                currentFontSize = fs;
+                term.options.fontSize = fs;
+                lastAutoCols = msg.cols;
+              }
               if (term.cols !== msg.cols || term.rows !== msg.rows) {
                 term.resize(msg.cols, msg.rows);
               }
-              term.write('\x1b[H\x1b[2J' + msg.data, function() {
-                if (!userScrolledUp) {
-                  term.scrollToBottom();
-                }
-              });
+              term.write('\x1b[H\x1b[2J' + msg.data);
             } else {
-              term.write(msg.data, function() {
-                if (!userScrolledUp) {
-                  term.scrollToBottom();
-                }
-              });
+              term.write(msg.data);
             }
           }
           break;
@@ -237,7 +240,9 @@ export function generateXtermHtml(): string {
           }
           break;
       }
-    } catch(e) {}
+    } catch(e) {
+      sendToRN({ type: 'error', data: String(e) });
+    }
   }
 
   function sendToRN(msg) {

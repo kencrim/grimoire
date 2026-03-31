@@ -72,6 +72,11 @@ export default function StreamScreen() {
         return;
       }
 
+      if (msg.type === 'error') {
+        console.error('[xterm.js]', msg.data);
+        return;
+      }
+
       // Forward input to the daemon
       const paneInput = toPaneInput(msg);
       if (paneInput && client) {
