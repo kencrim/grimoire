@@ -194,8 +194,15 @@ var daemonStartCmd = &cobra.Command{
 		var wsSrv *relay.WSServer
 		var disco *relay.Discovery
 		var tsNode *relay.TailscaleNode
+		var monitor *relay.StatusMonitor
 		if wsPort > 0 {
 			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
+			daemon.SetEventHandler(wsSrv.NotifyStreams)
+
+			// Start status monitor — polls agent panes for idle detection
+			monitor = relay.NewStatusMonitor(daemon)
+			monitor.Start()
+
 			addr := fmt.Sprintf("0.0.0.0:%d", wsPort)
 			go func() {
 				if err := wsSrv.Listen(addr); err != nil {
@@ -265,6 +272,9 @@ var daemonStartCmd = &cobra.Command{
 		go func() {
 			<-sigCh
 			log.Println("[daemon] shutting down...")
+			if monitor != nil {
+				monitor.Stop()
+			}
 			if disco != nil {
 				disco.Close()
 			}

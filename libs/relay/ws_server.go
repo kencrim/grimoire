@@ -355,11 +355,8 @@ func (ws *WSServer) dagSnapshot() (interface{}, error) {
 
 	type enrichedAgent struct {
 		AgentStatus
-		ParentID string `json:"parent_id,omitempty"`
-		Color    string `json:"color,omitempty"`
-		Shader   string `json:"shader,omitempty"`
-		Session  string `json:"session,omitempty"`
-		PaneID   string `json:"pane_id,omitempty"`
+		Color  string `json:"color,omitempty"`
+		Shader string `json:"shader,omitempty"`
 	}
 
 	// Load state tree for color/shader metadata
@@ -382,17 +379,9 @@ func (ws *WSServer) dagSnapshot() (interface{}, error) {
 		}
 	}
 
-	ws.daemon.mu.RLock()
-	defer ws.daemon.mu.RUnlock()
-
 	var result []enrichedAgent
 	for _, a := range agents {
 		ea := enrichedAgent{AgentStatus: a}
-		if handle, ok := ws.daemon.agents[a.ID]; ok {
-			ea.ParentID = handle.ParentID
-			ea.Session = handle.Session
-			ea.PaneID = handle.PaneID
-		}
 		ea.Color = nodeColors[a.ID]
 		ea.Shader = nodeShaders[a.ID]
 		result = append(result, ea)
