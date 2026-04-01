@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState, createContext, useContext, useCallback } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { RelayClient, parseGrimoireUri, checkDaemonHealth } from '../lib/relay-client';
 import type { AgentStatus, ConnectionConfig, StreamEvent } from '../lib/types';
 import { catppuccin } from '../lib/theme';
-import { requestNotificationPermissions, notifyAgentEvent } from '../lib/notifications';
+import {
+  requestNotificationPermissions,
+  notifyAgentEvent,
+  addNotificationResponseListener,
+} from '../lib/notifications';
 
 interface RelayContextValue {
   client: RelayClient | null;
@@ -43,6 +47,7 @@ export default function RootLayout() {
   const [config, setConfig] = useState<ConnectionConfig | null>(null);
   const [ready, setReady] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
+  const router = useRouter();
 
   // Restore saved connection on mount
   useEffect(() => {
@@ -63,7 +68,13 @@ export default function RootLayout() {
 
     requestNotificationPermissions();
 
+    // Navigate to the agent's stream when user taps a notification
+    const sub = addNotificationResponseListener((agentId) => {
+      router.push(`/stream/${agentId}`);
+    });
+
     return () => {
+      sub.remove();
       clientRef.current?.dispose();
     };
   }, []);

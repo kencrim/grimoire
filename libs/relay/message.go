@@ -42,12 +42,15 @@ type StatusRequest struct {
 	AgentID string `json:"agent_id"` // "all" for full DAG
 }
 
-// AgentStatus is returned by status queries.
+// AgentStatus is returned by status queries and streamed to mobile clients.
 type AgentStatus struct {
-	ID     string `json:"id"`
-	Status string `json:"status"` // alive, idle, exited
-	Agent  string `json:"agent"`
-	Task   string `json:"task,omitempty"`
+	ID       string `json:"id"`
+	Status   string `json:"status"` // alive, idle, exited
+	Agent    string `json:"agent"`
+	Task     string `json:"task,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
+	Session  string `json:"session,omitempty"`
+	PaneID   string `json:"pane_id,omitempty"`
 }
 
 // KillRequest asks the daemon to terminate an agent and its descendants.

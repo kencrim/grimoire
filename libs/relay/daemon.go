@@ -33,6 +33,7 @@ type Daemon struct {
 	onSpawn   func(SpawnRequest) (SpawnResponse, error)   // callback for spawning
 	onKill    func(KillRequest) (KillResponse, error)     // callback for killing
 	deliverFn func(agent *AgentHandle, text string) error // injectable for testing
+	onEvent   func(StreamEvent)                           // called when agents change (for WS broadcast)
 }
 
 // DefaultSocketPath returns the Unix socket path for the daemon.
@@ -57,6 +58,32 @@ func (d *Daemon) SetSpawnHandler(fn func(SpawnRequest) (SpawnResponse, error)) {
 // SetKillHandler sets the callback invoked when an agent requests a kill.
 func (d *Daemon) SetKillHandler(fn func(KillRequest) (KillResponse, error)) {
 	d.onKill = fn
+}
+
+// SetEventHandler sets the callback invoked when agent state changes.
+// Used to push events to WebSocket subscribers.
+func (d *Daemon) SetEventHandler(fn func(StreamEvent)) {
+	d.onEvent = fn
+}
+
+// emitEvent fires the event callback if set.
+func (d *Daemon) emitEvent(event StreamEvent) {
+	if d.onEvent != nil {
+		d.onEvent(event)
+	}
+}
+
+// enrichedStatus builds an AgentStatus with all fields from an AgentHandle.
+// Caller must hold at least d.mu.RLock.
+func (d *Daemon) enrichedStatus(handle *AgentHandle) AgentStatus {
+	return AgentStatus{
+		ID:       handle.ID,
+		Status:   handle.Status,
+		Agent:    handle.Agent,
+		ParentID: handle.ParentID,
+		Session:  handle.Session,
+		PaneID:   handle.PaneID,
+	}
 }
 
 // Register adds an agent to the registry.
@@ -174,11 +201,7 @@ func (d *Daemon) ListAgents() []AgentStatus {
 
 	var result []AgentStatus
 	for _, a := range d.agents {
-		result = append(result, AgentStatus{
-			ID:     a.ID,
-			Status: a.Status,
-			Agent:  a.Agent,
-		})
+		result = append(result, d.enrichedStatus(a))
 	}
 	return result
 }
@@ -281,6 +304,10 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 		}
 		for _, killedID := range kr.Killed {
 			d.Unregister(killedID)
+			d.emitEvent(StreamEvent{
+				Type: "agent_killed",
+				Data: AgentStatus{ID: killedID, Status: "exited"},
+			})
 		}
 		return kr, nil
 
@@ -311,8 +338,10 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 				Status:       "alive",
 			}
 		}
+		status := d.enrichedStatus(d.agents[reg.AgentID])
 		d.mu.Unlock()
 		log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
+		d.emitEvent(StreamEvent{Type: "agent_spawned", Data: status})
 		return map[string]string{"status": "registered"}, nil
 
 	case "unregister":
@@ -321,6 +350,10 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 			return nil, err
 		}
 		d.Unregister(reg.AgentID)
+		d.emitEvent(StreamEvent{
+			Type: "agent_killed",
+			Data: AgentStatus{ID: reg.AgentID, Status: "exited", Agent: reg.Agent},
+		})
 		return map[string]string{"status": "unregistered"}, nil
 
 	default:
