@@ -23,8 +23,11 @@ type WSServer struct {
 	daemon  *Daemon
 	token   string
 	mux     *http.ServeMux
-	server  *http.Server
 	treePath string // path to state.json for DAG snapshots
+
+	// Multiple HTTP servers (LAN + tsnet) sharing the same mux
+	serversMu sync.Mutex
+	servers   []*http.Server
 
 	// Event subscribers for DAG state changes
 	streamsMu   sync.Mutex
@@ -66,26 +69,41 @@ func (ws *WSServer) Token() string {
 	return ws.token
 }
 
+// Serve starts serving on an existing net.Listener. The listener can come from
+// net.Listen, tsnet.Server.Listen, or any other source. This allows the same
+// HTTP mux to serve on multiple interfaces (e.g., LAN + Tailscale).
+func (ws *WSServer) Serve(ln net.Listener) error {
+	srv := &http.Server{Handler: ws.mux}
+	ws.serversMu.Lock()
+	ws.servers = append(ws.servers, srv)
+	ws.serversMu.Unlock()
+	log.Printf("[ws-server] serving on %s", ln.Addr())
+	return srv.Serve(ln)
+}
+
 // Listen starts the HTTP/WebSocket server on the given address.
 func (ws *WSServer) Listen(addr string) error {
-	ws.server = &http.Server{
-		Addr:    addr,
-		Handler: ws.mux,
-	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("ws listen %s: %w", addr, err)
 	}
 	log.Printf("[ws-server] listening on %s", addr)
-	return ws.server.Serve(ln)
+	return ws.Serve(ln)
 }
 
-// Close shuts down the HTTP server.
+// Close shuts down all HTTP servers.
 func (ws *WSServer) Close() error {
-	if ws.server != nil {
-		return ws.server.Close()
+	ws.serversMu.Lock()
+	servers := ws.servers
+	ws.servers = nil
+	ws.serversMu.Unlock()
+	var firstErr error
+	for _, srv := range servers {
+		if err := srv.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 // NotifyStreams pushes an event to all /ws/streams subscribers.

@@ -105,6 +105,14 @@ func (d *Discovery) TailscaleIP() string {
 	return d.tailscaleIP
 }
 
+// SetTailscaleHost overrides the Tailscale hostname and IP, e.g. when using
+// an embedded tsnet node whose identity is separate from the system Tailscale.
+// Call before StartMDNS so the values are included in TXT records.
+func (d *Discovery) SetTailscaleHost(host, ip string) {
+	d.tailscaleHost = host
+	d.tailscaleIP = ip
+}
+
 // Close stops mDNS advertisement.
 func (d *Discovery) Close() {
 	if d.dnssdCmd != nil && d.dnssdCmd.Process != nil {
