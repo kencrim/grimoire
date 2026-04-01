@@ -61,12 +61,13 @@ function scanMDNS(log: DebugCallback): Promise<DiscoveredDaemon[]> {
       const tailscaleHost = service.txt?.tailscale ?? '';
 
       if (host && service.port > 0) {
+        const isTailscale = !!tailscaleHost || host.startsWith('100.') || host.includes('.ts.net');
         results.push({
           host,
           port: service.port,
           token,
           label: token ? `${service.name} (${host})` : `${service.name} (${host}) — needs token`,
-          type: 'lan',
+          type: isTailscale ? 'tailscale' : 'lan',
         });
 
         if (tailscaleHost) {

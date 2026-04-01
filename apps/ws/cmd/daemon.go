@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -31,6 +32,8 @@ var daemonStartCmd = &cobra.Command{
 		socketPath := relay.DefaultSocketPath()
 		foreground, _ := cmd.Flags().GetBool("foreground")
 		wsPort, _ := cmd.Flags().GetInt("ws-port")
+		tsnetEnabled, _ := cmd.Flags().GetBool("tsnet")
+		tsnetHostname, _ := cmd.Flags().GetString("tsnet-hostname")
 
 		// Check if already running
 		conn, err := net.Dial("unix", socketPath)
@@ -45,6 +48,9 @@ var daemonStartCmd = &cobra.Command{
 			bgArgs := []string{"daemon", "start", "--foreground"}
 			if wsPort > 0 {
 				bgArgs = append(bgArgs, fmt.Sprintf("--ws-port=%d", wsPort))
+			}
+			if tsnetEnabled {
+				bgArgs = append(bgArgs, "--tsnet", fmt.Sprintf("--tsnet-hostname=%s", tsnetHostname))
 			}
 			bgCmd := exec.Command(wsBin(), bgArgs...)
 			bgCmd.Stdout = logFile
@@ -79,6 +85,8 @@ var daemonStartCmd = &cobra.Command{
 			return fmt.Errorf("open log file: %w", err)
 		}
 		defer logFile.Close()
+		// Save real stderr before redirect so tsnet can print auth URLs to the terminal
+		realStderr := os.Stderr
 		log.SetOutput(logFile)
 		os.Stdout = logFile
 		os.Stderr = logFile
@@ -185,6 +193,7 @@ var daemonStartCmd = &cobra.Command{
 		// Start WebSocket server if port specified
 		var wsSrv *relay.WSServer
 		var disco *relay.Discovery
+		var tsNode *relay.TailscaleNode
 		if wsPort > 0 {
 			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
 			addr := fmt.Sprintf("0.0.0.0:%d", wsPort)
@@ -197,8 +206,46 @@ var daemonStartCmd = &cobra.Command{
 			// Persist WS port so `ws daemon connect` can read it
 			os.WriteFile(relay.WSPortPath(), []byte(fmt.Sprintf("%d", wsPort)), 0o644)
 
+			// Start embedded Tailscale node if requested
+			if tsnetEnabled {
+				tsNode = relay.NewTailscaleNode(tsnetHostname, wsPort, realStderr)
+
+				// First-run auth requires foreground mode (or TS_AUTHKEY)
+				if tsNode.NeedsAuth() && !foreground && os.Getenv("TS_AUTHKEY") == "" {
+					log.Printf("[daemon] tsnet: first-time setup requires foreground mode")
+					fmt.Fprintln(os.Stderr, "tsnet: first-time setup — run with --foreground to complete browser auth")
+					fmt.Fprintln(os.Stderr, "  ws daemon start --foreground --tsnet")
+					fmt.Fprintln(os.Stderr, "  (or set TS_AUTHKEY for headless auth)")
+				} else {
+					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					if _, err := tsNode.Up(ctx); err != nil {
+						log.Printf("[daemon] tsnet failed (non-fatal): %v", err)
+						tsNode = nil
+					} else {
+						// Serve WebSocket on the tsnet listener too
+						ln, err := tsNode.Listen()
+						if err != nil {
+							log.Printf("[daemon] tsnet listen failed: %v", err)
+						} else {
+							go func() {
+								if err := wsSrv.Serve(ln); err != nil {
+									log.Printf("[daemon] tsnet serve error: %v", err)
+								}
+							}()
+						}
+					}
+					cancel()
+				}
+			}
+
 			// Start mDNS/Bonjour advertisement + Tailscale detection
 			disco = relay.NewDiscovery(wsPort, wsSrv.Token())
+
+			// If tsnet is active, override the Tailscale hostname with the tsnet FQDN
+			if tsNode != nil && tsNode.FQDN() != "" {
+				disco.SetTailscaleHost(tsNode.FQDN(), "")
+			}
+
 			if err := disco.StartMDNS(); err != nil {
 				log.Printf("[daemon] mDNS failed (non-fatal): %v", err)
 			}
@@ -220,6 +267,9 @@ var daemonStartCmd = &cobra.Command{
 			log.Println("[daemon] shutting down...")
 			if disco != nil {
 				disco.Close()
+			}
+			if tsNode != nil {
+				tsNode.Close()
 			}
 			if wsSrv != nil {
 				wsSrv.Close()
@@ -390,6 +440,8 @@ func init() {
 	daemonStartCmd.Flags().Bool("foreground", false, "Run in foreground (used internally)")
 	daemonStartCmd.Flags().MarkHidden("foreground")
 	daemonStartCmd.Flags().Int("ws-port", 8077, "Port for WebSocket server (0 = disabled)")
+	daemonStartCmd.Flags().Bool("tsnet", false, "Enable embedded Tailscale node for remote access")
+	daemonStartCmd.Flags().String("tsnet-hostname", "grimoire", "Hostname for the tsnet node on the tailnet")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
