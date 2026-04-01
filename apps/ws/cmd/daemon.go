@@ -389,7 +389,7 @@ var daemonConnectCmd = &cobra.Command{
 func init() {
 	daemonStartCmd.Flags().Bool("foreground", false, "Run in foreground (used internally)")
 	daemonStartCmd.Flags().MarkHidden("foreground")
-	daemonStartCmd.Flags().Int("ws-port", 0, "Port for WebSocket server (0 = disabled)")
+	daemonStartCmd.Flags().Int("ws-port", 8077, "Port for WebSocket server (0 = disabled)")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)

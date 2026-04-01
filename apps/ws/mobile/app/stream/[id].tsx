@@ -50,8 +50,8 @@ export default function StreamScreen() {
     client.connectPane(agentRef, activeTab);
 
     const unsub = client.onPane((frame: PaneFrame) => {
-      // Pipe-pane sends incremental chunks (no cols/rows).
-      // Capture-pane sends full snapshots (has cols/rows) — xterm.js handles the reset.
+      // Every frame is a full capture-pane snapshot with cols/rows matching the
+      // desktop terminal. xterm.js resizes to match and clears before writing.
       writeToTerminal(webViewRef, frame.content, frame.cols, frame.rows);
     });
 
@@ -69,6 +69,11 @@ export default function StreamScreen() {
 
       if (msg.type === 'ready') {
         setTermReady(true);
+        return;
+      }
+
+      if (msg.type === 'error') {
+        console.error('[xterm.js]', msg.data);
         return;
       }
 

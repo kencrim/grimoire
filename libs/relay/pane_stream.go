@@ -1,12 +1,9 @@
 package relay
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,117 +13,61 @@ import (
 
 // PaneStreamer handles bidirectional terminal I/O for a tmux pane.
 type PaneStreamer struct {
-	target   string // tmux pane ID (e.g. %5) or session name
-	pipePath string // named pipe for pipe-pane output
+	target        string   // tmux pane ID (e.g. %5) or session name
+	prevStripped  []string // previous frame's lines with ANSI stripped (for scroll comparison)
 }
 
 // PaneFrame is a captured terminal snapshot sent to the phone.
 type PaneFrame struct {
-	Type    string `json:"type"`    // frame
-	Content string `json:"content"` // ANSI-encoded terminal content
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
+	Type     string `json:"type"`     // frame
+	Content  string `json:"content"`  // ANSI-encoded terminal content
+	Cols     int    `json:"cols"`
+	Rows     int    `json:"rows"`
+	Scrolled int    `json:"scrolled"` // -1 = full snapshot, 0 = in-place update, >0 = lines scrolled off top
 }
 
 // NewPaneStreamer creates a streamer for a tmux pane.
 func NewPaneStreamer(target string) *PaneStreamer {
-	// Create a unique named pipe for this pane stream
-	safeTarget := strings.ReplaceAll(strings.ReplaceAll(target, "%", "p"), "/", "_")
-	pipePath := fmt.Sprintf("%s/ws-pane-%s-%d", os.TempDir(), safeTarget, time.Now().UnixNano())
-
 	return &PaneStreamer{
-		target:   target,
-		pipePath: pipePath,
+		target: target,
 	}
 }
 
-// StreamTo streams pane output over the WebSocket using tmux pipe-pane.
-// Falls back to capture-pane polling if pipe-pane fails.
+// StreamTo streams pane output over the WebSocket using capture-pane polling.
+// First sends the scrollback history so the phone can scroll up through past output,
+// then polls the visible pane at ~15fps for live updates.
 func (ps *PaneStreamer) StreamTo(ctx context.Context, conn *websocket.Conn) {
-	// Try pipe-pane first for real-time streaming
-	if err := ps.streamViaPipe(ctx, conn); err != nil {
-		log.Printf("[pane-stream] pipe-pane failed for %s, falling back to capture-pane: %v", ps.target, err)
-		ps.streamViaCapture(ctx, conn)
-	}
+	// Send scrollback history first — this fills xterm.js scrollback buffer
+	// so the user can scroll up through past output.
+	ps.sendHistory(ctx, conn)
+	// Then start live polling of the visible pane
+	ps.streamViaCapture(ctx, conn)
 }
 
-// streamViaPipe uses tmux pipe-pane to get a real-time byte stream.
-func (ps *PaneStreamer) streamViaPipe(ctx context.Context, conn *websocket.Conn) error {
-	// Create named pipe (FIFO)
-	if err := exec.Command("mkfifo", ps.pipePath).Run(); err != nil {
-		return fmt.Errorf("mkfifo: %w", err)
-	}
-	defer os.Remove(ps.pipePath)
-
-	// Tell tmux to pipe output to our FIFO
-	pipeCmd := fmt.Sprintf("cat > %s", ps.pipePath)
-	if err := exec.Command("tmux", "pipe-pane", "-o", "-t", ps.target, pipeCmd).Run(); err != nil {
-		return fmt.Errorf("pipe-pane: %w", err)
+// sendHistory captures the tmux scrollback buffer and sends it as a single frame.
+// Sent without cols/rows so the phone writes it incrementally (no screen clear),
+// allowing the content to naturally flow into xterm.js scrollback.
+func (ps *PaneStreamer) sendHistory(ctx context.Context, conn *websocket.Conn) {
+	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p", "-S", "-1000")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return
 	}
 
-	// Detach pipe-pane when done
-	defer exec.Command("tmux", "pipe-pane", "-t", ps.target).Run()
-
-	// Open the FIFO for reading (this blocks until the writer connects)
-	// Run in a goroutine so we can cancel via context
-	type openResult struct {
-		file *os.File
-		err  error
+	// Send without cols/rows — the phone's JS treats frames without dimensions
+	// as incremental writes (no clear), so the content flows into scrollback.
+	frame := PaneFrame{
+		Type:     "frame",
+		Content:  string(out),
+		Scrolled: -1,
 	}
-	openCh := make(chan openResult, 1)
-	go func() {
-		f, err := os.Open(ps.pipePath)
-		openCh <- openResult{f, err}
-	}()
-
-	var file *os.File
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case result := <-openCh:
-		if result.err != nil {
-			return fmt.Errorf("open fifo: %w", result.err)
-		}
-		file = result.file
-	case <-time.After(3 * time.Second):
-		// FIFO open timed out — pipe-pane might not have started writing yet.
-		// Send one capture-pane frame to prime the connection, then try again.
-		return fmt.Errorf("fifo open timeout")
-	}
-	defer file.Close()
-
-	// Send an initial capture-pane snapshot so the phone sees content immediately
-	ps.sendCaptureFrame(ctx, conn)
-
-	// Stream pipe output in chunks
-	reader := bufio.NewReaderSize(file, 4096)
-	buf := make([]byte, 4096)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		n, err := reader.Read(buf)
-		if n > 0 {
-			frame := PaneFrame{
-				Type:    "frame",
-				Content: string(buf[:n]),
-			}
-			data, _ := json.Marshal(frame)
-			if writeErr := conn.Write(ctx, websocket.MessageText, data); writeErr != nil {
-				return nil
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("read pipe: %w", err)
-		}
-	}
+	data, _ := json.Marshal(frame)
+	conn.Write(ctx, websocket.MessageText, data)
 }
 
-// streamViaCapture falls back to polling capture-pane at ~15fps.
+// streamViaCapture polls capture-pane at ~15fps.
+// It detects when content scrolls (new lines at the bottom) and sends a scroll
+// offset so the phone can push old lines into xterm.js scrollback naturally.
 func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Conn) {
 	ticker := time.NewTicker(66 * time.Millisecond)
 	defer ticker.Stop()
@@ -144,11 +85,24 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 			}
 			lastContent = content
 
+			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+			stripped := make([]string, len(lines))
+			for i, l := range lines {
+				stripped[i] = stripAnsi(l)
+			}
+
+			scrolled := -1 // default: full snapshot (first frame or dimension change)
+			if ps.prevStripped != nil && len(stripped) == len(ps.prevStripped) {
+				scrolled = detectScroll(ps.prevStripped, stripped)
+			}
+			ps.prevStripped = stripped
+
 			frame := PaneFrame{
-				Type:    "frame",
-				Content: content,
-				Cols:    cols,
-				Rows:    rows,
+				Type:     "frame",
+				Content:  content,
+				Cols:     cols,
+				Rows:     rows,
+				Scrolled: scrolled,
 			}
 			data, _ := json.Marshal(frame)
 			if err := conn.Write(ctx, websocket.MessageText, data); err != nil {
@@ -158,27 +112,77 @@ func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Co
 	}
 }
 
-// sendCaptureFrame sends a single capture-pane snapshot.
-func (ps *PaneStreamer) sendCaptureFrame(ctx context.Context, conn *websocket.Conn) {
-	content, cols, rows := ps.capturePaneContent()
-	if content == "" {
-		return
+// detectScroll checks if newLines is a scrolled version of prevLines.
+// Both slices should have ANSI codes already stripped for reliable comparison.
+// Returns the number of lines scrolled off the top (0 = in-place change only).
+func detectScroll(prevLines, newLines []string) int {
+	n := len(newLines)
+
+	// Try offsets 1..maxCheck: if newLines[0:n-offset] matches prevLines[offset:n],
+	// then 'offset' lines scrolled off the top.
+	maxCheck := 20
+	if maxCheck > n/2 {
+		maxCheck = n / 2
 	}
-	frame := PaneFrame{
-		Type:    "frame",
-		Content: content,
-		Cols:    cols,
-		Rows:    rows,
+
+	for offset := 1; offset <= maxCheck; offset++ {
+		match := true
+		// Check the overlapping region. Ignore the bottom 3 lines since
+		// status bars (Claude Code prompt line, etc.) change independently of scroll.
+		checkEnd := n - offset - 3
+		if checkEnd < 3 {
+			continue
+		}
+		for i := 0; i < checkEnd; i++ {
+			if newLines[i] != prevLines[i+offset] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return offset
+		}
 	}
-	data, _ := json.Marshal(frame)
-	conn.Write(ctx, websocket.MessageText, data)
+	return 0
 }
 
-// capturePaneContent snapshots the pane using tmux capture-pane.
+// stripAnsi removes ANSI escape sequences from a string for comparison purposes.
+func stripAnsi(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\033' {
+			// Skip CSI sequences: ESC [ ... final_byte
+			if i+1 < len(s) && s[i+1] == '[' {
+				j := i + 2
+				for j < len(s) && s[j] >= 0x30 && s[j] <= 0x3F {
+					j++ // parameter bytes
+				}
+				for j < len(s) && s[j] >= 0x20 && s[j] <= 0x2F {
+					j++ // intermediate bytes
+				}
+				if j < len(s) {
+					j++ // final byte
+				}
+				i = j
+				continue
+			}
+			// Skip other ESC sequences (ESC + one byte)
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// capturePaneContent snapshots the pane using tmux capture-pane with ANSI codes preserved.
 func (ps *PaneStreamer) capturePaneContent() (content string, cols, rows int) {
-	// Capture without -e (no escape sequences) for clean text output.
-	// tmux-specific ANSI codes don't translate well to xterm.js.
-	cmd := exec.Command("tmux", "capture-pane", "-t", ps.target, "-p")
+	// Capture with -e to preserve ANSI escape sequences (colors, formatting).
+	// The phone's xterm.js renders these natively.
+	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", 0, 0

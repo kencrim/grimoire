@@ -20,12 +20,11 @@ import (
 
 // WSServer handles WebSocket connections for the mobile companion app.
 type WSServer struct {
-	daemon   *Daemon
-	token    string
-	mux      *http.ServeMux
-	server   *http.Server
+	daemon  *Daemon
+	token   string
+	mux     *http.ServeMux
+	server  *http.Server
 	treePath string // path to state.json for DAG snapshots
-	shadows  *ShadowManager
 
 	// Event subscribers for DAG state changes
 	streamsMu   sync.Mutex
@@ -52,7 +51,6 @@ func NewWSServer(daemon *Daemon, treePath string) *WSServer {
 		daemon:      daemon,
 		treePath:    treePath,
 		mux:         http.NewServeMux(),
-		shadows:     NewShadowManager(),
 		streamsSubs: make(map[chan StreamEvent]struct{}),
 	}
 	ws.token = ws.loadOrCreateToken()
@@ -82,9 +80,8 @@ func (ws *WSServer) Listen(addr string) error {
 	return ws.server.Serve(ln)
 }
 
-// Close shuts down the HTTP server and cleans up shadow sessions.
+// Close shuts down the HTTP server.
 func (ws *WSServer) Close() error {
-	ws.shadows.CleanupAll()
 	if ws.server != nil {
 		return ws.server.Close()
 	}
@@ -213,6 +210,9 @@ func (ws *WSServer) handleStreams(w http.ResponseWriter, r *http.Request) {
 
 // handlePanes serves /ws/panes/:id — bidirectional terminal I/O.
 // Query param ?pane=agent|terminal selects which pane to stream.
+// The phone acts as a viewport into the desktop terminal — it receives
+// capture-pane snapshots at the desktop's native dimensions and renders
+// them in xterm.js. No shadow sessions or resizing involved.
 func (ws *WSServer) handlePanes(w http.ResponseWriter, r *http.Request) {
 	// Extract pane ID from URL: /ws/panes/%5 or /ws/panes/auth
 	paneRef := strings.TrimPrefix(r.URL.Path, "/ws/panes/")
@@ -260,20 +260,7 @@ func (ws *WSServer) handlePanes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Acquire shadow session for independent phone dimensions
-	if agent.Session != "" {
-		shadowName, err := ws.shadows.Acquire(agent.Session)
-		if err != nil {
-			log.Printf("[ws-server] shadow session failed: %v (using original)", err)
-		} else {
-			defer ws.shadows.Release(agent.Session)
-			// Remap the pane target to the shadow session's equivalent pane
-			paneTarget = ws.shadows.PaneInShadow(agent.Session, paneTarget)
-			log.Printf("[ws-server] using shadow session %s, pane %s", shadowName, paneTarget)
-		}
-	}
-
-	// Start streaming pane output
+	// Stream pane output directly from the original session
 	streamer := NewPaneStreamer(paneTarget)
 	go streamer.StreamTo(ctx, conn)
 
@@ -287,10 +274,6 @@ func (ws *WSServer) handlePanes(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(msgData, &input); err != nil {
 			log.Printf("[ws-server] pane input decode: %v", err)
 			continue
-		}
-		// Handle resize via shadow session manager
-		if input.Type == "resize" && input.Cols > 0 && input.Rows > 0 && agent.Session != "" {
-			ws.shadows.Resize(agent.Session, input.Cols, input.Rows)
 		}
 		if err := streamer.HandleInput(input); err != nil {
 			log.Printf("[ws-server] pane input error: %v", err)
