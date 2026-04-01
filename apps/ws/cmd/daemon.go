@@ -197,7 +197,15 @@ var daemonStartCmd = &cobra.Command{
 		var monitor *relay.StatusMonitor
 		if wsPort > 0 {
 			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
-			daemon.SetEventHandler(wsSrv.NotifyStreams)
+			daemon.SetEventHandler(func(event relay.StreamEvent) {
+				wsSrv.NotifyStreams(event)
+				// Send push notification for idle transitions
+				if event.Type == "status_changed" {
+					if status, ok := event.Data.(relay.AgentStatus); ok && status.Status == "idle" {
+						wsSrv.Push.NotifyIdle(status)
+					}
+				}
+			})
 
 			// Start status monitor — polls agent panes for idle detection
 			monitor = relay.NewStatusMonitor(daemon)

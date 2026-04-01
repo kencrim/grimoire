@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import type { StreamEvent, AgentStatus } from './types';
+import type { StreamEvent, AgentStatus, ConnectionConfig } from './types';
 
 // Configure foreground notification behavior — show alerts even when
 // the app is open so the user sees when any agent finishes.
@@ -54,5 +54,23 @@ export function notifyAgentEvent(event: StreamEvent): void {
       data: { agentId: agent.id },
     },
     trigger: null, // fire immediately
+  });
+}
+
+// Register Expo push token with the daemon so it can send remote
+// notifications even when the app is closed.
+export async function registerPushToken(config: ConnectionConfig): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  const granted = await requestNotificationPermissions();
+  if (!granted) return;
+
+  const tokenData = await Notifications.getExpoPushTokenAsync();
+  const token = tokenData.data;
+
+  await fetch(`http://${config.host}:${config.port}/api/push-token?token=${config.token}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
   });
 }

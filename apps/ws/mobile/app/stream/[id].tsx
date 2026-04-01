@@ -155,13 +155,13 @@ export default function StreamScreen() {
           originWhitelist={['*']}
           javaScriptEnabled
           onMessage={handleWebViewMessage}
-          scrollEnabled={false}
-          bounces={false}
-          overScrollMode="never"
+          scrollEnabled
+          bounces
+          overScrollMode="always"
           keyboardDisplayRequiresUserAction={false}
           hideKeyboardAccessoryView
           showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator
         />
       </View>
 

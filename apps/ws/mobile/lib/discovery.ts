@@ -70,8 +70,8 @@ function scanMDNS(log: DebugCallback): Promise<DiscoveredDaemon[]> {
           type: isTailscale ? 'tailscale' : 'lan',
         });
 
-        if (tailscaleHost) {
-          saveTailscaleHost(tailscaleHost);
+        if (tailscaleHost && token) {
+          saveTailscaleConfig({ host: tailscaleHost, port: service.port, token });
         }
       }
     });
@@ -118,18 +118,19 @@ async function probeSavedConnections(
     );
   }
 
-  const tsHost = await SecureStore.getItemAsync(TAILSCALE_HOST_KEY);
-  if (tsHost && savedConfig && tsHost !== savedConfig.host) {
-    log(`Probing Tailscale: ${tsHost}:${savedConfig.port}`);
+  // Probe saved Tailscale config independently — works even after disconnect
+  const tsConfig = await getSavedTailscaleConfig();
+  if (tsConfig && tsConfig.host !== savedConfig?.host) {
+    log(`Probing Tailscale: ${tsConfig.host}:${tsConfig.port}`);
     checks.push(
-      probeHost(tsHost, savedConfig.port).then((ok) => {
-        log(`Tailscale probe ${tsHost}: ${ok ? 'reachable' : 'unreachable'}`);
+      probeHost(tsConfig.host, tsConfig.port).then((ok) => {
+        log(`Tailscale probe ${tsConfig.host}: ${ok ? 'reachable' : 'unreachable'}`);
         if (ok) {
           found.push({
-            host: tsHost,
-            port: savedConfig.port,
-            token: savedConfig.token,
-            label: `Tailscale (${tsHost})`,
+            host: tsConfig.host,
+            port: tsConfig.port,
+            token: tsConfig.token,
+            label: `Tailscale (${tsConfig.host})`,
             type: 'tailscale',
           });
         }
@@ -158,8 +159,22 @@ async function probeHost(host: string, port: number): Promise<boolean> {
   return false;
 }
 
-export async function saveTailscaleHost(host: string): Promise<void> {
-  if (host.includes('.ts.net') || host.startsWith('100.')) {
-    await SecureStore.setItemAsync(TAILSCALE_HOST_KEY, host);
+// Save a complete Tailscale connection config so the app can reach the
+// daemon over Tailscale even after disconnect wipes the primary config.
+export async function saveTailscaleConfig(config: ConnectionConfig): Promise<void> {
+  if (config.host.includes('.ts.net') || config.host.startsWith('100.')) {
+    await SecureStore.setItemAsync(TAILSCALE_HOST_KEY, JSON.stringify(config));
+  }
+}
+
+export async function getSavedTailscaleConfig(): Promise<ConnectionConfig | null> {
+  const stored = await SecureStore.getItemAsync(TAILSCALE_HOST_KEY);
+  if (!stored) return null;
+  try {
+    // Handle legacy format (plain hostname string)
+    if (!stored.startsWith('{')) return null;
+    return JSON.parse(stored);
+  } catch {
+    return null;
   }
 }

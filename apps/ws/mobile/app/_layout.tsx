@@ -10,7 +10,9 @@ import {
   requestNotificationPermissions,
   notifyAgentEvent,
   addNotificationResponseListener,
+  registerPushToken,
 } from '../lib/notifications';
+import { getSavedTailscaleConfig } from '../lib/discovery';
 
 interface RelayContextValue {
   client: RelayClient | null;
@@ -56,10 +58,16 @@ export default function RootLayout() {
         if (stored) {
           try {
             const saved: ConnectionConfig = JSON.parse(stored);
-            await connectToConfig(saved);
+            const ok = await connectToConfig(saved);
+            if (ok) return;
           } catch {
             // ignore corrupt data
           }
+        }
+        // Primary config failed or missing — try saved Tailscale config
+        const tsConfig = await getSavedTailscaleConfig();
+        if (tsConfig) {
+          await connectToConfig(tsConfig);
         }
       })
       .finally(() => {
@@ -118,8 +126,15 @@ export default function RootLayout() {
     setClient(newClient);
     setConfig(cfg);
 
-    // Persist config
-    await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(cfg));
+    // Persist config — may fail if device is locked (Keychain unavailable)
+    try {
+      await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(cfg));
+    } catch {
+      // Keychain write rejected (e.g. device locked during background restore)
+    }
+
+    // Register push token so daemon can send remote notifications
+    registerPushToken(cfg).catch(() => {});
 
     return true;
   }, []);

@@ -24,6 +24,7 @@ type WSServer struct {
 	token   string
 	mux     *http.ServeMux
 	treePath string // path to state.json for DAG snapshots
+	Push    *PushService
 
 	// Multiple HTTP servers (LAN + tsnet) sharing the same mux
 	serversMu sync.Mutex
@@ -55,12 +56,14 @@ func NewWSServer(daemon *Daemon, treePath string) *WSServer {
 		treePath:    treePath,
 		mux:         http.NewServeMux(),
 		streamsSubs: make(map[chan StreamEvent]struct{}),
+		Push:        NewPushService(),
 	}
 	ws.token = ws.loadOrCreateToken()
 	ws.mux.HandleFunc("/ws/streams", ws.requireAuth(ws.handleStreams))
 	ws.mux.HandleFunc("/ws/panes/", ws.requireAuth(ws.handlePanes))
 	ws.mux.HandleFunc("/ws/relay", ws.requireAuth(ws.handleRelay))
 	ws.mux.HandleFunc("/api/health", ws.handleHealth)
+	ws.mux.HandleFunc("/api/push-token", ws.Push.HandlePushToken(ws.requireAuth))
 	return ws
 }
 

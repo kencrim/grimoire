@@ -1,9 +1,11 @@
 import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
 
 export default function SettingsScreen() {
   const { config, connected, disconnect } = useRelay();
+  const router = useRouter();
 
   const handleDisconnect = () => {
     Alert.alert('Disconnect', 'This will disconnect from the relay daemon.', [
@@ -11,7 +13,10 @@ export default function SettingsScreen() {
       {
         text: 'Disconnect',
         style: 'destructive',
-        onPress: disconnect,
+        onPress: () => {
+          disconnect();
+          router.replace('/connect');
+        },
       },
     ]);
   };
@@ -47,9 +52,13 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {config && (
+      {connected ? (
         <Pressable style={styles.disconnectButton} onPress={handleDisconnect}>
           <Text style={styles.disconnectText}>Disconnect</Text>
+        </Pressable>
+      ) : (
+        <Pressable style={styles.disconnectButton} onPress={() => router.replace('/connect')}>
+          <Text style={styles.reconnectText}>Reconnect</Text>
         </Pressable>
       )}
 
@@ -139,6 +148,11 @@ const styles = StyleSheet.create({
   },
   disconnectText: {
     color: catppuccin.red,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  reconnectText: {
+    color: catppuccin.lavender,
     fontSize: 16,
     fontWeight: '600',
   },
