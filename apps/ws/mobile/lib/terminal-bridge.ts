@@ -107,15 +107,17 @@ export function generateXtermHtml(): string {
   const theme = ${themeJson};
 
   const term = new Terminal({
-    fontSize: 12,
+    fontSize: 16,
     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
     scrollback: 1000,
     scrollSensitivity: 3,
+    smoothScrollDuration: 100,
     cursorBlink: true,
     cursorStyle: 'block',
     allowTransparency: true,
     theme: theme,
     convertEol: true,
+    wordWrap: true,
   });
 
   const fitAddon = new FitAddon.FitAddon();
@@ -136,18 +138,27 @@ export function generateXtermHtml(): string {
     userScrolledUp = (buf.viewportY < buf.baseY);
   });
 
-  // Character width ratio for monospace fonts (Menlo/Courier).
-  // ~0.6 means each character is 60% of the font size in pixels.
-  var charWidthRatio = 0.602;
+  // Pause live updates while user is touching the screen.
+  // Frame writes clear and rewrite the terminal, which fights with
+  // touch gestures and causes jerky/interrupted scrolling.
+  var userTouching = false;
+  document.addEventListener('touchstart', function() {
+    userTouching = true;
+  }, { passive: true });
+  document.addEventListener('touchend', function() {
+    userTouching = false;
+  }, { passive: true });
+  document.addEventListener('touchcancel', function() {
+    userTouching = false;
+  }, { passive: true });
 
-  // Font size state — auto-calculated on first frame or when desktop cols change.
-  // Pinch-to-zoom overrides this until the desktop dimensions change.
-  var currentFontSize = 12;
-  var lastAutoCols = 0;
+  // Font size state — phone uses its own natural column width (no auto-shrink
+  // to fit desktop cols). Pinch-to-zoom adjusts the font size.
+  var currentFontSize = 16;
 
   // Pinch-to-zoom for font size
   var pinchStartDist = 0;
-  var pinchStartFontSize = 12;
+  var pinchStartFontSize = 16;
 
   document.addEventListener('touchstart', function(e) {
     if (e.touches.length === 2) {
@@ -165,7 +176,7 @@ export function generateXtermHtml(): string {
       var dist = Math.sqrt(dx * dx + dy * dy);
       var scale = dist / pinchStartDist;
       var newSize = Math.round(pinchStartFontSize * scale);
-      newSize = Math.max(4, Math.min(24, newSize));
+      newSize = Math.max(8, Math.min(32, newSize));
       if (newSize !== currentFontSize) {
         currentFontSize = newSize;
         term.options.fontSize = newSize;
@@ -218,23 +229,10 @@ export function generateXtermHtml(): string {
         case 'write':
           if (msg.data) {
             if (msg.cols && msg.rows) {
-              // Live update — skip if user is scrolled up reading history
-              if (userScrolledUp) break;
-              if (msg.cols !== lastAutoCols) {
-                var cw = document.documentElement.clientWidth - 8;
-                var fs = Math.round(cw / (msg.cols * charWidthRatio));
-                if (fs < 6) fs = 6;
-                if (fs > 14) fs = 14;
-                currentFontSize = fs;
-                term.options.fontSize = fs;
-                lastAutoCols = msg.cols;
-                // Recalculate rows for new font size — fill the full screen height
-                fitAddon.fit();
-              }
-              // Match desktop cols but keep phone's natural row count
-              if (term.cols !== msg.cols) {
-                term.resize(msg.cols, term.rows);
-              }
+              // Live update — skip if user is scrolled up or actively touching
+              if (userScrolledUp || userTouching) break;
+              // Let xterm use the phone's natural column width — text from
+              // wider desktop lines wraps instead of shrinking the font.
               term.write('\x1b[H\x1b[2J' + msg.data);
             } else {
               // History or incremental frame — always write

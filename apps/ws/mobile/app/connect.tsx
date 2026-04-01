@@ -13,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { useRelay } from './_layout';
 import { catppuccin } from '../lib/theme';
 import { parseGrimoireUri } from '../lib/relay-client';
-import { discoverDaemons, saveTailscaleHost, type DiscoveredDaemon } from '../lib/discovery';
+import { discoverDaemons, saveTailscaleConfig, type DiscoveredDaemon } from '../lib/discovery';
 
 export default function ConnectScreen() {
   const { connected, connect, connectFromUri, config } = useRelay();
@@ -51,7 +51,7 @@ export default function ConnectScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     if (daemon.type === 'tailscale') {
-      saveTailscaleHost(daemon.host);
+      saveTailscaleConfig({ host: daemon.host, port: daemon.port, token: daemon.token });
     }
 
     const ok = await connect({
@@ -79,7 +79,7 @@ export default function ConnectScreen() {
     }
 
     if (parsed.host.includes('.ts.net')) {
-      saveTailscaleHost(parsed.host);
+      saveTailscaleConfig({ host: parsed.host, port: parsed.port, token: parsed.token });
     }
 
     const ok = await connectFromUri(data);
