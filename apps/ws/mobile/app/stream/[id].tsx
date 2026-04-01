@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,18 +10,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { WebView } from 'react-native-webview';
-import type { WebViewMessageEvent } from 'react-native-webview';
 import * as Haptics from 'expo-haptics';
 import { useRelay } from '../_layout';
-import {
-  generateXtermHtml,
-  writeToTerminal,
-  clearTerminal,
-  parseWebViewMessage,
-  toPaneInput,
-} from '../../lib/terminal-bridge';
-import type { PaneFrame, PaneInputMsg } from '../../lib/types';
+import { NativeTerminalView } from '../../components/NativeTerminalView';
+import type { PaneFrame } from '../../lib/types';
 import { catppuccin } from '../../lib/theme';
 
 type PaneTab = 'agent' | 'terminal';
@@ -29,11 +21,9 @@ type PaneTab = 'agent' | 'terminal';
 export default function StreamScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { client, agents } = useRelay();
-  const webViewRef = useRef<WebView>(null);
-  const htmlRef = useRef(generateXtermHtml());
   const [activeTab, setActiveTab] = useState<PaneTab>('agent');
   const [inputText, setInputText] = useState('');
-  const [termReady, setTermReady] = useState(false);
+  const [latestFrame, setLatestFrame] = useState<PaneFrame | null>(null);
 
   // Find the agent to get pane info
   const agent = agents.find((a) => a.id === id);
@@ -42,52 +32,25 @@ export default function StreamScreen() {
   // The agent ID is what we pass to the daemon — it resolves the pane internally
   const agentRef = id ?? '';
 
-  // Connect pane WebSocket when ready, reconnect when tab switches
+  // Connect pane WebSocket and receive frames
   useEffect(() => {
-    if (!client || !agentRef || !termReady) return;
+    if (!client || !agentRef) return;
 
-    clearTerminal(webViewRef);
+    setLatestFrame(null);
     client.connectPane(agentRef, activeTab);
 
     const unsub = client.onPane((frame: PaneFrame) => {
-      // Every frame is a full capture-pane snapshot with cols/rows matching the
-      // desktop terminal. xterm.js resizes to match and clears before writing.
-      writeToTerminal(webViewRef, frame.content, frame.cols, frame.rows);
+      setLatestFrame(frame);
     });
 
     return () => {
       unsub();
       client.disconnectPane();
     };
-  }, [client, agentRef, termReady, activeTab]);
-
-  // Handle messages from xterm.js WebView
-  const handleWebViewMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      const msg = parseWebViewMessage(event.nativeEvent.data);
-      if (!msg) return;
-
-      if (msg.type === 'ready') {
-        setTermReady(true);
-        return;
-      }
-
-      if (msg.type === 'error') {
-        console.error('[xterm.js]', msg.data);
-        return;
-      }
-
-      // Forward input to the daemon
-      const paneInput = toPaneInput(msg);
-      if (paneInput && client) {
-        client.sendPaneInput(paneInput);
-      }
-    },
-    [client]
-  );
+  }, [client, agentRef, activeTab]);
 
   // Handle send button for the text input bar
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     if (!inputText.trim() || !client) return;
 
     // Send as literal text + Enter
@@ -97,7 +60,7 @@ export default function StreamScreen() {
     setInputText('');
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
+  }, [inputText, client]);
 
   const switchTab = (tab: PaneTab) => {
     if (tab === activeTab) return;
@@ -146,23 +109,9 @@ export default function StreamScreen() {
         }}
       />
 
-      {/* Terminal WebView */}
+      {/* Native terminal renderer */}
       <View style={styles.terminal}>
-        <WebView
-          ref={webViewRef}
-          source={{ html: htmlRef.current }}
-          style={styles.webview}
-          originWhitelist={['*']}
-          javaScriptEnabled
-          onMessage={handleWebViewMessage}
-          scrollEnabled
-          bounces
-          overScrollMode="always"
-          keyboardDisplayRequiresUserAction={false}
-          hideKeyboardAccessoryView
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator
-        />
+        <NativeTerminalView frame={latestFrame} />
       </View>
 
       {/* Pane tab switcher */}
@@ -228,10 +177,6 @@ const styles = StyleSheet.create({
   },
   terminal: {
     flex: 1,
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: 'transparent',
   },
   tabBar: {
     flexDirection: 'row',
