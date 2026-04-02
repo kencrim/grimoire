@@ -8,23 +8,17 @@ import type { AgentStatus, StreamNode } from '../../lib/types';
 import { useCallback, useMemo, useState } from 'react';
 
 export default function StreamsScreen() {
-  const { agents, connected, config, client } = useRelay();
+  const { agents, connected, config, refreshAgents } = useRelay();
   const [refreshing, setRefreshing] = useState(false);
 
   // Build tree from flat agent list
   const flatNodes = useMemo(() => flattenTree(agents), [agents]);
 
   const onRefresh = useCallback(async () => {
-    if (!client) return;
     setRefreshing(true);
-    try {
-      const fresh = await client.getStatus();
-      // The streams WebSocket will update state — this is just a manual trigger
-    } catch {
-      // ignore
-    }
+    await refreshAgents();
     setRefreshing(false);
-  }, [client]);
+  }, [refreshAgents]);
 
   return (
     <View style={styles.container}>
