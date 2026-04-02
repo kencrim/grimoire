@@ -21,6 +21,7 @@ interface RelayContextValue {
   connect: (config: ConnectionConfig) => Promise<boolean>;
   connectFromUri: (uri: string) => Promise<boolean>;
   disconnect: () => void;
+  refreshAgents: () => Promise<void>;
   config: ConnectionConfig | null;
   ready: boolean;
 }
@@ -32,6 +33,7 @@ const RelayContext = createContext<RelayContextValue>({
   connect: async () => false,
   connectFromUri: async () => false,
   disconnect: () => {},
+  refreshAgents: async () => {},
   config: null,
   ready: false,
 });
@@ -145,6 +147,18 @@ export default function RootLayout() {
     return connectToConfig(parsed);
   }, [connectToConfig]);
 
+  const refreshAgents = useCallback(async () => {
+    if (!clientRef.current) return;
+    try {
+      const fresh = await clientRef.current.getStatus();
+      if (Array.isArray(fresh)) {
+        setAgents(fresh);
+      }
+    } catch {
+      // ignore — WebSocket will recover on its own
+    }
+  }, []);
+
   const disconnect = useCallback(() => {
     clientRef.current?.dispose();
     clientRef.current = null;
@@ -164,6 +178,7 @@ export default function RootLayout() {
         connect: connectToConfig,
         connectFromUri,
         disconnect,
+        refreshAgents,
         config,
         ready,
       }}

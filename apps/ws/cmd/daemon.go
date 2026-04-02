@@ -103,6 +103,7 @@ var daemonStartCmd = &cobra.Command{
 			log.Printf("[daemon] warning: could not load state: %v", err)
 		} else {
 			rehydrated := 0
+			var deadIDs []string
 			for _, node := range tree.Nodes {
 				// Check if the tmux session is still alive
 				alive := false
@@ -123,8 +124,22 @@ var daemonStartCmd = &cobra.Command{
 					rehydrated++
 				} else {
 					log.Printf("[daemon] skipped dead agent %q", node.ID)
+					deadIDs = append(deadIDs, node.ID)
 				}
 			}
+
+			// Prune dead entries from state.json so they don't persist across restarts
+			if len(deadIDs) > 0 {
+				for _, id := range deadIDs {
+					delete(tree.Nodes, id)
+				}
+				if err := tree.Save(); err != nil {
+					log.Printf("[daemon] warning: could not prune state.json: %v", err)
+				} else {
+					log.Printf("[daemon] pruned %d dead agent(s) from state.json", len(deadIDs))
+				}
+			}
+
 			if rehydrated > 0 {
 				log.Printf("[daemon] rehydrated %d agent(s) from state.json", rehydrated)
 			}
