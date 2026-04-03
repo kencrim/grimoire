@@ -2,7 +2,6 @@ package relay
 
 import (
 	"log"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -95,6 +94,7 @@ func (sm *StatusMonitor) pollAll() {
 		agent   string
 		session string
 		paneID  string
+		host    string
 		status  string
 	}
 	agents := make([]agentSnapshot, 0, len(sm.daemon.agents))
@@ -104,6 +104,7 @@ func (sm *StatusMonitor) pollAll() {
 			agent:   a.Agent,
 			session: a.Session,
 			paneID:  a.PaneID,
+			host:    a.Host,
 			status:  a.Status,
 		})
 	}
@@ -134,7 +135,7 @@ func (sm *StatusMonitor) pollAll() {
 			sm.states[agent.id] = state
 		}
 
-		content := captureAgentPane(agent.session, agent.paneID)
+		content := captureAgentPane(agent.host, agent.session, agent.paneID)
 		if content == "" {
 			continue
 		}
@@ -223,7 +224,8 @@ func (sm *StatusMonitor) transitionAgent(agentID string, newStatus string) {
 }
 
 // captureAgentPane captures a tmux pane's content as plain text (no ANSI).
-func captureAgentPane(session, paneID string) string {
+// Routes through SSH for remote agents.
+func captureAgentPane(host, session, paneID string) string {
 	target := paneID
 	if target == "" {
 		target = session
@@ -232,7 +234,7 @@ func captureAgentPane(session, paneID string) string {
 		return ""
 	}
 
-	cmd := exec.Command("tmux", "capture-pane", "-t", target, "-p")
+	cmd := runOnHost(host, "tmux", "capture-pane", "-t", target, "-p")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

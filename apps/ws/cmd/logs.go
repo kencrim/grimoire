@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/kencrim/grimoire/libs/core"
 	"github.com/spf13/cobra"
@@ -32,7 +31,7 @@ var logsCmd = &cobra.Command{
 		}
 
 		// Capture last 50 lines of the pane
-		capture := exec.Command("tmux", "capture-pane", "-p", "-t", target, "-S", "-50")
+		capture := core.RunOnHost(node.Host, "tmux", "capture-pane", "-p", "-t", target, "-S", "-50")
 		capture.Stdout = os.Stdout
 		capture.Stderr = os.Stderr
 		return capture.Run()

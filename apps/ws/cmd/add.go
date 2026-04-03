@@ -28,6 +28,7 @@ var addAgent string
 var addTask string
 var addBranch string
 var addParent string
+var addOn string
 
 var addCmd = &cobra.Command{
 	Use:   "add <name>",
@@ -58,6 +59,11 @@ the parent's branch). They inherit the parent's visual theme.`,
 		// Auto-start daemon if not running
 		if err := ensureDaemon(socketPath); err != nil {
 			return err
+		}
+
+		// Remote workstream creation
+		if addOn != "" {
+			return createRemoteWorkstream(name, addAgent, addTask, addOn, socketPath)
 		}
 
 		return createWorkstream(name, addAgent, addTask, addBranch, socketPath)
@@ -366,10 +372,161 @@ func ensureDaemon(socketPath string) error {
 	return fmt.Errorf("daemon did not start within 2 seconds")
 }
 
+// createRemoteWorkstream creates a workstream on a registered remote host.
+// The agent runs on the remote inside a tmux session accessed via SSH.
+func createRemoteWorkstream(name, agent, task, remoteName, socketPath string) error {
+	tree, err := core.LoadTree(core.DefaultStatePath())
+	if err != nil {
+		return err
+	}
+
+	// Idempotency: if workstream already exists, just attach
+	if existing, ok := tree.Nodes[name]; ok {
+		fmt.Printf("Workstream %q already exists, attaching...\n", name)
+		if existing.Type == core.NodeTypeRemote && existing.Host != "" {
+			sshAttach := exec.Command("ssh", "-t", existing.Host, "tmux", "attach-session", "-t", existing.Session)
+			sshAttach.Stdin = os.Stdin
+			sshAttach.Stdout = os.Stdout
+			sshAttach.Stderr = os.Stderr
+			return sshAttach.Run()
+		}
+		attachCmd := exec.Command("tmux", "switch-client", "-t", existing.Session)
+		if err := attachCmd.Run(); err != nil {
+			attachCmd = exec.Command("tmux", "attach-session", "-t", existing.Session)
+			attachCmd.Stdin = os.Stdin
+			attachCmd.Stdout = os.Stdout
+			attachCmd.Stderr = os.Stderr
+			return attachCmd.Run()
+		}
+		return nil
+	}
+
+	// Resolve the remote host
+	registry, err := core.LoadRegistry(core.DefaultRemotesPath())
+	if err != nil {
+		return fmt.Errorf("load remotes: %w", err)
+	}
+	remote, ok := registry.Get(remoteName)
+	if !ok {
+		return fmt.Errorf("remote %q not found (see: ws remote list)", remoteName)
+	}
+
+	sshHost := remote.SSHHost
+	workDir := remote.WorkDir
+	sessionName := "ws/" + name
+
+	// Create tmux session on remote
+	tmuxNew := core.RunOnHost(sshHost, "tmux", "new-session", "-d", "-s", sessionName,
+		"-c", workDir, "-P", "-F", "#{pane_id}")
+	out, err := tmuxNew.CombinedOutput()
+	if err != nil {
+		// Check if session already exists on remote
+		checkSession := core.RunOnHost(sshHost, "tmux", "has-session", "-t", sessionName)
+		if checkSession.Run() == nil {
+			log.Printf("[ws add] reusing existing remote tmux session %s", sessionName)
+		} else {
+			return fmt.Errorf("remote tmux new-session: %s", string(out))
+		}
+	}
+	agentPaneID := strings.TrimSpace(string(out))
+
+	// Split into agent (left, 65%) and terminal (right, 35%)
+	splitCmd := core.RunOnHost(sshHost, "tmux", "split-window", "-h", "-d",
+		"-t", agentPaneID, "-c", workDir, "-l", "35%")
+	splitCmd.CombinedOutput()
+
+	// Launch agent directly (no ws agent-run wrapper on remote)
+	if agent != "" {
+		var agentLaunchCmd string
+		switch agent {
+		case "claude":
+			agentLaunchCmd = "claude --dangerously-skip-permissions"
+		case "amp":
+			agentLaunchCmd = "amp --dangerously-allow-all"
+		case "codex":
+			agentLaunchCmd = "codex --full-auto"
+		default:
+			return fmt.Errorf("unknown agent type: %s", agent)
+		}
+
+		tmuxSend := core.RunOnHost(sshHost, "tmux", "send-keys", "-t", agentPaneID, agentLaunchCmd, "Enter")
+		if out, err := tmuxSend.CombinedOutput(); err != nil {
+			return fmt.Errorf("remote tmux send-keys: %s", string(out))
+		}
+
+		// Inject initial task after agent starts
+		if task != "" {
+			waitForRemotePane(sshHost, agentPaneID)
+			taskSend := core.RunOnHost(sshHost, "tmux", "send-keys", "-t", agentPaneID, task, "Enter")
+			taskSend.CombinedOutput()
+		}
+	}
+
+	// Assign theme (for mobile app + list display, even though Ghostty shaders are local-only)
+	theme := core.AssignTheme(len(tree.Nodes))
+
+	// Build and save the node
+	parts := strings.Split(name, "/")
+	node := &core.Node{
+		ID:        name,
+		Name:      parts[len(parts)-1],
+		Type:      core.NodeTypeRemote,
+		Status:    core.StatusRunning,
+		Agent:     agent,
+		WorkDir:   workDir,
+		Session:   sessionName,
+		PaneID:    agentPaneID,
+		Color:     theme.Border,
+		Shader:    theme.Shader,
+		Host:      sshHost,
+		Workspace: remoteName,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := tree.Add(node); err != nil {
+		return err
+	}
+	if err := tree.Save(); err != nil {
+		return err
+	}
+
+	fmt.Printf("Created remote workstream %q\n", name)
+	fmt.Printf("  Remote:    %s (%s)\n", remoteName, sshHost)
+	fmt.Printf("  WorkDir:   %s\n", workDir)
+	fmt.Printf("  Session:   %s\n", sessionName)
+	if agent != "" {
+		fmt.Printf("  Agent:     %s\n", agent)
+	}
+	fmt.Printf("  Theme:     %s (border: %s)\n", theme.Label, theme.Border)
+
+	// Attach interactively via SSH
+	sshAttach := exec.Command("ssh", "-t", sshHost, "tmux", "attach-session", "-t", sessionName)
+	sshAttach.Stdin = os.Stdin
+	sshAttach.Stdout = os.Stdout
+	sshAttach.Stderr = os.Stderr
+	sshAttach.Run()
+
+	return nil
+}
+
+// waitForRemotePane polls until a remote tmux pane is ready.
+func waitForRemotePane(host, paneID string) {
+	for i := 0; i < 30; i++ {
+		time.Sleep(500 * time.Millisecond)
+		check := core.RunOnHost(host, "tmux", "display-message", "-t", paneID, "-p", "#{pane_pid}")
+		if check.Run() == nil {
+			return
+		}
+	}
+	log.Printf("[ws add] warning: remote pane %s not ready after 15s, proceeding anyway", paneID)
+}
+
 func init() {
 	addCmd.Flags().StringVarP(&addAgent, "agent", "a", "claude", "Agent to launch (claude, amp, codex)")
 	addCmd.Flags().StringVarP(&addTask, "task", "t", "", "Task description for the agent")
 	addCmd.Flags().StringVarP(&addBranch, "branch", "b", "", "Use an existing git branch (instead of creating ws-<name>)")
 	addCmd.Flags().StringVarP(&addParent, "parent", "p", "", "Parent workstream (child branches off parent's branch)")
+	addCmd.Flags().StringVar(&addOn, "on", "", "Remote host to create workstream on (from ws remote list)")
 	rootCmd.AddCommand(addCmd)
 }

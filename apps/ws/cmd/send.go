@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/kencrim/grimoire/libs/core"
@@ -35,7 +34,7 @@ For other agents, uses tmux send-keys as a fallback.`,
 		if target == "" {
 			target = "ws/" + name
 		}
-		tmuxSend := exec.Command("tmux", "send-keys", "-t", target, message, "Enter")
+		tmuxSend := core.RunOnHost(node.Host, "tmux", "send-keys", "-t", target, message, "Enter")
 		if out, err := tmuxSend.CombinedOutput(); err != nil {
 			return fmt.Errorf("send failed: %s", string(out))
 		}

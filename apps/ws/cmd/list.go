@@ -51,7 +51,21 @@ func printNode(tree *core.Tree, node *core.Node, prefix string, last bool) {
 		agent = fmt.Sprintf(" [%s]", node.Agent)
 	}
 
-	fmt.Printf("%s%s%s %s%s (%s)\n", prefix, connector, status, node.Name, agent, node.Branch)
+	remote := ""
+	if node.Type == core.NodeTypeRemote {
+		remoteName := node.Workspace
+		if remoteName == "" {
+			remoteName = node.Host
+		}
+		remote = fmt.Sprintf(" \033[90m@%s\033[0m", remoteName)
+	}
+
+	branchOrDir := node.Branch
+	if branchOrDir == "" && node.Type == core.NodeTypeRemote {
+		branchOrDir = node.WorkDir
+	}
+
+	fmt.Printf("%s%s%s %s%s%s (%s)\n", prefix, connector, status, node.Name, agent, remote, branchOrDir)
 
 	children := tree.Children(node.ID)
 	sort.Slice(children, func(i, j int) bool {

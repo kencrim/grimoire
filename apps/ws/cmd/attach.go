@@ -34,6 +34,15 @@ var attachCmd = &cobra.Command{
 			}
 		}
 
+		// Remote workstreams: SSH into the host and attach to the tmux session
+		if node.Type == core.NodeTypeRemote && node.Host != "" {
+			sshAttach := exec.Command("ssh", "-t", node.Host, "tmux", "attach-session", "-t", node.Session)
+			sshAttach.Stdin = os.Stdin
+			sshAttach.Stdout = os.Stdout
+			sshAttach.Stderr = os.Stderr
+			return sshAttach.Run()
+		}
+
 		// Prefer PaneID for split panes, fall back to session
 		target := node.PaneID
 		if target == "" {

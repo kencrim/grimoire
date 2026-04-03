@@ -23,7 +23,7 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		// Check which tmux sessions are actually alive
+		// Check which local tmux sessions are actually alive
 		tmuxList := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 		out, _ := tmuxList.Output()
 		liveSessions := make(map[string]bool)
@@ -31,19 +31,32 @@ var statusCmd = &cobra.Command{
 			liveSessions[line] = true
 		}
 
-		fmt.Printf("%-20s %-10s %-10s %-30s %s\n", "WORKSTREAM", "AGENT", "STATUS", "BRANCH", "SESSION")
-		fmt.Printf("%-20s %-10s %-10s %-30s %s\n", "----------", "-----", "------", "------", "-------")
+		fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n", "WORKSTREAM", "AGENT", "STATUS", "HOST", "BRANCH", "SESSION")
+		fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n", "----------", "-----", "------", "----", "------", "-------")
 
 		for _, node := range tree.Nodes {
 			status := string(node.Status)
-			if !liveSessions[node.Session] {
+			host := "local"
+
+			if node.Type == core.NodeTypeRemote && node.Host != "" {
+				host = node.Workspace
+				if host == "" {
+					host = node.Host
+				}
+				// Check remote session alive via SSH
+				check := core.RunOnHost(node.Host, "tmux", "has-session", "-t", node.Session)
+				if check.Run() != nil {
+					status = "dead"
+				}
+			} else if !liveSessions[node.Session] {
 				status = "dead"
 			}
 
-			fmt.Printf("%-20s %-10s %-10s %-30s %s\n",
+			fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n",
 				node.ID,
 				node.Agent,
 				status,
+				host,
 				node.Branch,
 				node.Session,
 			)

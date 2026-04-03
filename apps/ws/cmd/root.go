@@ -91,6 +91,15 @@ Running ws with no subcommand opens an interactive workstream picker.`,
 			}
 		}
 
+		// Remote workstreams: SSH into the host and attach
+		if node.Type == core.NodeTypeRemote && node.Host != "" {
+			sshAttach := exec.Command("ssh", "-t", node.Host, "tmux", "attach-session", "-t", node.Session)
+			sshAttach.Stdin = os.Stdin
+			sshAttach.Stdout = os.Stdout
+			sshAttach.Stderr = os.Stderr
+			return sshAttach.Run()
+		}
+
 		// Switch to the workstream
 		if os.Getenv("TMUX") != "" {
 			tmux := exec.Command("tmux", "switch-client", "-t", node.Session)
@@ -145,6 +154,15 @@ func appendTreeNode(tree *core.Tree, node *core.Node, prefix string, last bool, 
 		agent = fmt.Sprintf(" \033[36m[%s]\033[0m", node.Agent)
 	}
 
+	remote := ""
+	if node.Type == core.NodeTypeRemote {
+		remoteName := node.Workspace
+		if remoteName == "" {
+			remoteName = node.Host
+		}
+		remote = fmt.Sprintf(" \033[33m@%s\033[0m", remoteName)
+	}
+
 	// Color the workstream name using the border color.
 	// If the node's color is too dark (old tint value), look up the parent's color.
 	displayColor := node.Color
@@ -163,7 +181,7 @@ func appendTreeNode(tree *core.Tree, node *core.Node, prefix string, last bool, 
 	}
 	coloredName := colorize(node.ID, displayColor)
 
-	line := fmt.Sprintf("%s%s%s%s%s", prefix, connector, coloredName, agent, themeLabel)
+	line := fmt.Sprintf("%s%s%s%s%s%s", prefix, connector, coloredName, agent, remote, themeLabel)
 	*lines = append(*lines, line)
 
 	children := tree.Children(node.ID)
