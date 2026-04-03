@@ -105,10 +105,10 @@ var daemonStartCmd = &cobra.Command{
 			rehydrated := 0
 			var deadIDs []string
 			for _, node := range tree.Nodes {
-				// Check if the tmux session is still alive
+				// Check if the tmux session is still alive (SSH for remote)
 				alive := false
 				if node.Session != "" {
-					check := exec.Command("tmux", "has-session", "-t", node.Session)
+					check := core.RunOnHost(node.Host, "tmux", "has-session", "-t", node.Session)
 					alive = check.Run() == nil
 				}
 
@@ -119,6 +119,7 @@ var daemonStartCmd = &cobra.Command{
 						Agent:        node.Agent,
 						WorktreePath: node.WorkDir,
 						Session:      node.Session,
+						Host:         node.Host,
 						Status:       "alive",
 					})
 					rehydrated++
@@ -178,12 +179,12 @@ var daemonStartCmd = &cobra.Command{
 
 			var killedIDs []string
 			for _, node := range removed {
-				// Kill this workstream's tmux session
+				// Kill this workstream's tmux session (routes through SSH for remote)
 				if node.Session != "" {
-					exec.Command("tmux", "kill-session", "-t", node.Session).Run()
+					core.RunOnHost(node.Host, "tmux", "kill-session", "-t", node.Session).Run()
 				}
 
-				// Remove git worktree
+				// Remove git worktree (local only)
 				if node.Type == core.NodeTypeLocal && node.WorkDir != "" {
 					gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
 					if out, err := gitRemove.CombinedOutput(); err != nil {

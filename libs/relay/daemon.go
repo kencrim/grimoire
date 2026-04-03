@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +23,7 @@ type AgentHandle struct {
 	WorktreePath string
 	Session      string // tmux session name
 	PaneID       string // tmux pane ID (e.g. %5) — used for targeting split panes
+	Host         string // SSH host for remote agents (empty = local)
 	Status       string // alive, idle, exited
 }
 
@@ -166,6 +168,7 @@ func (d *Daemon) deliver(agentID string, msg Message) error {
 }
 
 // tmuxDeliver is the default deliverFn that sends text via tmux send-keys.
+// Routes through SSH for remote agents.
 func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
 	target := agent.Session
 	if target == "" {
@@ -173,7 +176,7 @@ func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
 	}
 
 	// Verify the target session exists before sending
-	check := exec.Command("tmux", "has-session", "-t", target)
+	check := runOnHost(agent.Host, "tmux", "has-session", "-t", target)
 	if err := check.Run(); err != nil {
 		return fmt.Errorf("pane %q not reachable for agent %q: %w", target, agent.ID, err)
 	}
@@ -181,7 +184,7 @@ func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
 	// Retry up to 2 times on failure with 500ms backoff
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		cmd := exec.Command("tmux", "send-keys", "-t", target, text, "Enter")
+		cmd := runOnHost(agent.Host, "tmux", "send-keys", "-t", target, text, "Enter")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			lastErr = fmt.Errorf("tmux send-keys to %q (agent %q): %s", target, agent.ID, string(out))
 			log.Printf("[daemon] deliver attempt %d/%d failed: %v", attempt+1, 3, lastErr)
@@ -192,6 +195,43 @@ func (d *Daemon) tmuxDeliver(agent *AgentHandle, text string) error {
 		return nil
 	}
 	return lastErr
+}
+
+// runOnHost builds an exec.Cmd that runs locally (host="") or via SSH.
+// This is a relay-local copy to avoid a dependency cycle with libs/core.
+func runOnHost(host string, name string, args ...string) *exec.Cmd {
+	if host == "" {
+		return exec.Command(name, args...)
+	}
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, name)
+	for _, arg := range args {
+		parts = append(parts, shellEscapeArg(arg))
+	}
+	remoteCmd := ""
+	for i, p := range parts {
+		if i > 0 {
+			remoteCmd += " "
+		}
+		remoteCmd += p
+	}
+	return exec.Command("ssh", "-o", "BatchMode=yes", host, remoteCmd)
+}
+
+// shellEscapeArg wraps a string in single quotes if it contains shell-special chars.
+func shellEscapeArg(s string) string {
+	safe := true
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == '@' || c == '%' || c == '+') {
+			safe = false
+			break
+		}
+	}
+	if safe && s != "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // ListAgents returns all registered agents.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -13,8 +12,10 @@ import (
 
 // PaneStreamer handles bidirectional terminal I/O for a tmux pane.
 type PaneStreamer struct {
-	target        string   // tmux pane ID (e.g. %5) or session name
-	prevStripped  []string // previous frame's lines with ANSI stripped (for scroll comparison)
+	target        string        // tmux pane ID (e.g. %5) or session name
+	host          string        // SSH host for remote agents (empty = local)
+	interval      time.Duration // polling interval (lower for remote to reduce SSH overhead)
+	prevStripped  []string      // previous frame's lines with ANSI stripped (for scroll comparison)
 }
 
 // PaneFrame is a captured terminal snapshot sent to the phone.
@@ -27,9 +28,16 @@ type PaneFrame struct {
 }
 
 // NewPaneStreamer creates a streamer for a tmux pane.
-func NewPaneStreamer(target string) *PaneStreamer {
+// For remote panes, the polling rate is reduced to ~3fps to account for SSH overhead.
+func NewPaneStreamer(target string, host string) *PaneStreamer {
+	interval := 66 * time.Millisecond // ~15fps for local
+	if host != "" {
+		interval = 333 * time.Millisecond // ~3fps for remote
+	}
 	return &PaneStreamer{
-		target: target,
+		target:   target,
+		host:     host,
+		interval: interval,
 	}
 }
 
@@ -48,7 +56,7 @@ func (ps *PaneStreamer) StreamTo(ctx context.Context, conn *websocket.Conn) {
 // Sent without cols/rows so the phone writes it incrementally (no screen clear),
 // allowing the content to naturally flow into xterm.js scrollback.
 func (ps *PaneStreamer) sendHistory(ctx context.Context, conn *websocket.Conn) {
-	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p", "-S", "-1000")
+	cmd := runOnHost(ps.host, "tmux", "capture-pane", "-e", "-t", ps.target, "-p", "-S", "-1000")
 	out, err := cmd.Output()
 	if err != nil || len(out) == 0 {
 		return
@@ -69,7 +77,7 @@ func (ps *PaneStreamer) sendHistory(ctx context.Context, conn *websocket.Conn) {
 // It detects when content scrolls (new lines at the bottom) and sends a scroll
 // offset so the phone can push old lines into xterm.js scrollback naturally.
 func (ps *PaneStreamer) streamViaCapture(ctx context.Context, conn *websocket.Conn) {
-	ticker := time.NewTicker(66 * time.Millisecond)
+	ticker := time.NewTicker(ps.interval)
 	defer ticker.Stop()
 
 	var lastContent string
@@ -182,13 +190,13 @@ func stripAnsi(s string) string {
 func (ps *PaneStreamer) capturePaneContent() (content string, cols, rows int) {
 	// Capture with -e to preserve ANSI escape sequences (colors, formatting).
 	// The phone's xterm.js renders these natively.
-	cmd := exec.Command("tmux", "capture-pane", "-e", "-t", ps.target, "-p")
+	cmd := runOnHost(ps.host, "tmux", "capture-pane", "-e", "-t", ps.target, "-p")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", 0, 0
 	}
 
-	dimCmd := exec.Command("tmux", "display-message", "-t", ps.target, "-p", "#{pane_width} #{pane_height}")
+	dimCmd := runOnHost(ps.host, "tmux", "display-message", "-t", ps.target, "-p", "#{pane_width} #{pane_height}")
 	dimOut, err := dimCmd.Output()
 	if err != nil {
 		return string(out), 0, 0
@@ -217,7 +225,7 @@ func (ps *PaneStreamer) HandleInput(input PaneInputMsg) error {
 		if input.Data == "" {
 			return nil
 		}
-		cmd := exec.Command("tmux", "send-keys", "-l", "-t", ps.target, input.Data)
+		cmd := runOnHost(ps.host, "tmux", "send-keys", "-l", "-t", ps.target, input.Data)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("[pane-stream] send-keys -l error: %s", string(out))
 			return err
@@ -227,7 +235,7 @@ func (ps *PaneStreamer) HandleInput(input PaneInputMsg) error {
 		if input.Data == "" {
 			return nil
 		}
-		cmd := exec.Command("tmux", "send-keys", "-t", ps.target, input.Data)
+		cmd := runOnHost(ps.host, "tmux", "send-keys", "-t", ps.target, input.Data)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("[pane-stream] send-keys special error: %s", string(out))
 			return err

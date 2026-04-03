@@ -34,6 +34,15 @@ var switchCmd = &cobra.Command{
 			}
 		}
 
+		// Remote workstreams: SSH into the host and attach to the tmux session
+		if node.Type == core.NodeTypeRemote && node.Host != "" {
+			sshAttach := exec.Command("ssh", "-t", node.Host, "tmux", "attach-session", "-t", node.Session)
+			sshAttach.Stdin = os.Stdin
+			sshAttach.Stdout = os.Stdout
+			sshAttach.Stderr = os.Stderr
+			return sshAttach.Run()
+		}
+
 		// If inside tmux, switch client. Otherwise attach to the session.
 		if os.Getenv("TMUX") != "" {
 			tmux := exec.Command("tmux", "switch-client", "-t", node.Session)

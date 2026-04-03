@@ -57,10 +57,10 @@ var killCmd = &cobra.Command{
 		for _, node := range removed {
 			// Kill this workstream's tmux session
 			if node.Session != "" {
-				exec.Command("tmux", "kill-session", "-t", node.Session).Run()
+				core.RunOnHost(node.Host, "tmux", "kill-session", "-t", node.Session).Run()
 			}
 
-			// Remove git worktree
+			// Remove git worktree (local only)
 			if node.Type == core.NodeTypeLocal {
 				gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
 				if out, err := gitRemove.CombinedOutput(); err != nil {

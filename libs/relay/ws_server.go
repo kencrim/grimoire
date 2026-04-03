@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -264,7 +263,7 @@ func (ws *WSServer) handlePanes(w http.ResponseWriter, r *http.Request) {
 	// Resolve the agent's pane ID — if not stored, get the first pane in the session
 	agentPaneID := agent.PaneID
 	if agentPaneID == "" && agent.Session != "" {
-		agentPaneID = firstPaneInSession(agent.Session)
+		agentPaneID = firstPaneInSession(agent.Host, agent.Session)
 	}
 
 	// Default to agent pane
@@ -276,13 +275,13 @@ func (ws *WSServer) handlePanes(w http.ResponseWriter, r *http.Request) {
 	// If terminal tab requested, find the sibling pane
 	paneSelector := r.URL.Query().Get("pane")
 	if paneSelector == "terminal" && agent.Session != "" && agentPaneID != "" {
-		if sibling := findSiblingPane(agent.Session, agentPaneID); sibling != "" {
+		if sibling := findSiblingPane(agent.Host, agent.Session, agentPaneID); sibling != "" {
 			paneTarget = sibling
 		}
 	}
 
 	// Stream pane output directly from the original session
-	streamer := NewPaneStreamer(paneTarget)
+	streamer := NewPaneStreamer(paneTarget, agent.Host)
 	go streamer.StreamTo(ctx, conn)
 
 	// Read input from phone
@@ -394,8 +393,8 @@ func (ws *WSServer) dagSnapshot() (interface{}, error) {
 
 // firstPaneInSession returns the first pane ID in a tmux session.
 // This is the original pane (the agent pane) before any splits.
-func firstPaneInSession(session string) string {
-	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
+func firstPaneInSession(host, session string) string {
+	cmd := runOnHost(host, "tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -409,9 +408,9 @@ func firstPaneInSession(session string) string {
 
 // findSiblingPane returns the other pane in a tmux session.
 // Given the agent's pane ID, it finds the sibling (terminal) pane.
-func findSiblingPane(session string, agentPaneID string) string {
+func findSiblingPane(host, session string, agentPaneID string) string {
 	// List all panes in the session: output format "#{pane_id}" per line
-	cmd := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
+	cmd := runOnHost(host, "tmux", "list-panes", "-t", session, "-F", "#{pane_id}")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
