@@ -1,11 +1,13 @@
-import { Pressable, View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ActionSheetIOS, Alert } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { catppuccin } from '../lib/theme';
+import { AnimatedIconButton } from './AnimatedIconButton';
 import type { StreamNode } from '../lib/types';
 
 interface StreamTreeItemProps {
   node: StreamNode;
+  onKill?: (id: string) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,24 +25,64 @@ const AGENT_LABELS: Record<string, string> = {
   codex: 'codex',
 };
 
-export function StreamTreeItem({ node }: StreamTreeItemProps) {
+function confirmKill(name: string, onConfirm: () => void) {
+  Alert.alert(
+    'Kill workstream?',
+    `This will destroy the worktree and tmux session for "${name}" and all its children.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Kill', style: 'destructive', onPress: onConfirm },
+    ],
+  );
+}
+
+export function showWorkstreamActions(
+  node: StreamNode,
+  onKill: () => void,
+) {
+  const actions = ['Kill Workstream', 'Cancel'];
+  const destructiveIndex = 0;
+  const cancelIndex = actions.length - 1;
+
+  if (process.env.EXPO_OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: actions,
+        destructiveButtonIndex: destructiveIndex,
+        cancelButtonIndex: cancelIndex,
+        title: node.name,
+      },
+      (index) => {
+        if (index === destructiveIndex) {
+          confirmKill(node.name, onKill);
+        }
+      },
+    );
+  } else {
+    confirmKill(node.name, onKill);
+  }
+}
+
+export function StreamTreeItem({ node, onKill }: StreamTreeItemProps) {
   const statusColor = node.color ?? STATUS_COLORS[node.status] ?? catppuccin.overlay0;
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/stream/${encodeURIComponent(node.id)}`);
   };
 
   const handleLongPress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // TODO: show action sheet (kill, send message)
+    if (!onKill) return;
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    showWorkstreamActions(node, () => onKill(node.id));
   };
 
   return (
-    <Pressable
-      style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+    <AnimatedIconButton
+      style={styles.item}
       onPress={handlePress}
       onLongPress={handleLongPress}
+      pressScale={0.97}
     >
       {/* Indent based on depth */}
       {node.depth > 0 && <View style={{ width: node.depth * 20 }} />}
@@ -71,7 +113,7 @@ export function StreamTreeItem({ node }: StreamTreeItemProps) {
           {AGENT_LABELS[node.agent] ?? node.agent}
         </Text>
       </View>
-    </Pressable>
+    </AnimatedIconButton>
   );
 }
 
@@ -82,9 +124,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 4,
     borderRadius: 8,
-  },
-  itemPressed: {
-    backgroundColor: catppuccin.surface0,
+    borderCurve: 'continuous',
   },
   connector: {
     marginRight: 4,
@@ -112,6 +152,7 @@ const styles = StyleSheet.create({
   badge: {
     borderWidth: 1,
     borderRadius: 6,
+    borderCurve: 'continuous',
     paddingHorizontal: 8,
     paddingVertical: 3,
   },

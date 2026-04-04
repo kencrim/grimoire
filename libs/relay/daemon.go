@@ -330,6 +330,13 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 		}
 		return nil, fmt.Errorf("agent %q not found", req.AgentID)
 
+	case "skills":
+		var req SkillsRequest
+		if err := json.Unmarshal(env.Payload, &req); err != nil {
+			return nil, err
+		}
+		return d.discoverSkills(req.AgentID)
+
 	case "kill":
 		var req KillRequest
 		if err := json.Unmarshal(env.Payload, &req); err != nil {
@@ -399,6 +406,173 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown action %q", env.Action)
 	}
+}
+
+// discoverSkills returns available slash commands for an agent by scanning the
+// same locations Claude Code uses: installed plugins, user commands, and
+// project commands.
+func (d *Daemon) discoverSkills(agentID string) ([]Skill, error) {
+	// Resolve worktree for project-specific skills (skip for "all")
+	var worktree string
+	if agentID != "" && agentID != "all" {
+		d.mu.RLock()
+		agent, ok := d.agents[agentID]
+		d.mu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("agent %q not found", agentID)
+		}
+		worktree = agent.WorktreePath
+	}
+
+	var skills []Skill
+
+	home, _ := os.UserHomeDir()
+
+	// 1. Installed plugin commands — only plugins listed in installed_plugins.json,
+	//    filtered by scope (user = all agents, local = matching worktree only).
+	if home != "" {
+		skills = append(skills, scanInstalledPlugins(home, worktree)...)
+	}
+
+	// 2. User commands (may include namespaced subdirs like gsd/):
+	//    ~/.claude/commands/**/*.md
+	if home != "" {
+		userDir := filepath.Join(home, ".claude", "commands")
+		skills = append(skills, scanCommandTree(userDir, "user")...)
+	}
+
+	// 3. Project commands from the agent's worktree:
+	//    <worktree>/.claude/commands/**/*.md
+	if worktree != "" {
+		projectDir := filepath.Join(worktree, ".claude", "commands")
+		skills = append(skills, scanCommandTree(projectDir, "project")...)
+	}
+
+	// Deduplicate by name (plugins may appear in multiple marketplaces)
+	seen := make(map[string]bool, len(skills))
+	deduped := make([]Skill, 0, len(skills))
+	for _, s := range skills {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			deduped = append(deduped, s)
+		}
+	}
+
+	return deduped, nil
+}
+
+// installedPluginsFile mirrors the structure of ~/.claude/plugins/installed_plugins.json.
+type installedPluginsFile struct {
+	Version int                          `json:"version"`
+	Plugins map[string][]pluginInstall   `json:"plugins"`
+}
+
+type pluginInstall struct {
+	Scope       string `json:"scope"`       // "user" or "local"
+	ProjectPath string `json:"projectPath"` // only set for scope=local
+	InstallPath string `json:"installPath"` // path to the plugin's cached files
+}
+
+// scanInstalledPlugins reads installed_plugins.json and returns commands only from
+// plugins that are actually installed and in-scope for the given worktree.
+func scanInstalledPlugins(home, worktree string) []Skill {
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
+	if err != nil {
+		return nil
+	}
+	var registry installedPluginsFile
+	if json.Unmarshal(data, &registry) != nil {
+		return nil
+	}
+
+	var skills []Skill
+	for _, installs := range registry.Plugins {
+		for _, inst := range installs {
+			// Filter by scope: user plugins apply everywhere,
+			// local plugins only when worktree is under projectPath
+			if inst.Scope == "local" && worktree != "" {
+				if !strings.HasPrefix(worktree, inst.ProjectPath) {
+					continue
+				}
+			} else if inst.Scope == "local" {
+				// No worktree to match against (e.g. "all" query) — skip local plugins
+				continue
+			}
+
+			// Scan commands from the plugin's install path
+			cmdDir := filepath.Join(inst.InstallPath, "commands")
+			pattern := filepath.Join(cmdDir, "*.md")
+			matches, err := filepath.Glob(pattern)
+			if err != nil {
+				continue
+			}
+			for _, path := range matches {
+				name := strings.TrimSuffix(filepath.Base(path), ".md")
+				fm := extractFrontmatter(path)
+				skills = append(skills, Skill{Name: name, Description: fm.Description, Source: "plugin", ArgumentHint: fm.ArgumentHint})
+			}
+		}
+	}
+	return skills
+}
+
+// scanCommandTree walks a commands directory recursively. Subdirectories form
+// namespaced commands: gsd/debug.md -> "gsd:debug".
+func scanCommandTree(root, source string) []Skill {
+	var skills []Skill
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		// Convert path separators to colon namespace: gsd/debug.md -> gsd:debug
+		name := strings.TrimSuffix(rel, ".md")
+		name = strings.ReplaceAll(name, string(filepath.Separator), ":")
+		fm := extractFrontmatter(path)
+		skills = append(skills, Skill{Name: name, Description: fm.Description, Source: source, ArgumentHint: fm.ArgumentHint})
+		return nil
+	})
+	return skills
+}
+
+// skillFrontmatter holds parsed metadata from a skill file's YAML frontmatter.
+type skillFrontmatter struct {
+	Description  string
+	ArgumentHint string
+}
+
+// extractFrontmatter reads the YAML frontmatter of a skill file and returns
+// the description and argument-hint fields. Frontmatter is delimited by "---" lines.
+func extractFrontmatter(path string) skillFrontmatter {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return skillFrontmatter{}
+	}
+	content := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(content, "---") {
+		return skillFrontmatter{}
+	}
+	rest := content[3:]
+	idx := strings.Index(rest, "\n---")
+	if idx < 0 {
+		return skillFrontmatter{}
+	}
+	var fm skillFrontmatter
+	for _, line := range strings.Split(rest[:idx], "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "description:") {
+			fm.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			fm.Description = strings.Trim(fm.Description, "\"")
+			if len(fm.Description) > 120 {
+				fm.Description = fm.Description[:117] + "..."
+			}
+		}
+		if strings.HasPrefix(line, "argument-hint:") {
+			fm.ArgumentHint = strings.TrimSpace(strings.TrimPrefix(line, "argument-hint:"))
+			fm.ArgumentHint = strings.Trim(fm.ArgumentHint, "\"")
+		}
+	}
+	return fm
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {

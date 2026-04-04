@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -146,18 +149,28 @@ var daemonStartCmd = &cobra.Command{
 			}
 		}
 
-		// Wire up spawn handler — when an agent calls relay_spawn,
-		// the daemon creates a child workstream
+		// Wire up spawn handler — creates workstreams from agents or mobile app
 		daemon.SetSpawnHandler(func(req relay.SpawnRequest) (relay.SpawnResponse, error) {
-			childName := req.ParentID + "/" + req.Name
-			log.Printf("[daemon] spawn requested: %s (parent: %s)", childName, req.ParentID)
+			var wsName string
+			if req.ParentID != "" {
+				wsName = req.ParentID + "/" + req.Name
+			} else {
+				wsName = req.Name
+			}
 
-			if err := createWorkstream(childName, "claude", req.Task, "", socketPath); err != nil {
+			agent := req.Agent
+			if agent == "" {
+				agent = "claude"
+			}
+
+			log.Printf("[daemon] spawn requested: %s (parent: %q, repo: %q, agent: %s)", wsName, req.ParentID, req.Repo, agent)
+
+			if err := createWorkstream(wsName, agent, req.Task, "", req.Repo, socketPath); err != nil {
 				return relay.SpawnResponse{}, err
 			}
 
 			return relay.SpawnResponse{
-				AgentID: childName,
+				AgentID: wsName,
 				Status:  "spawned",
 			}, nil
 		})
@@ -185,11 +198,8 @@ var daemonStartCmd = &cobra.Command{
 				}
 
 				// Remove git worktree (local only)
-				if node.Type == core.NodeTypeLocal && node.WorkDir != "" {
-					gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
-					if out, err := gitRemove.CombinedOutput(); err != nil {
-						log.Printf("[daemon] warning: worktree remove %s: %s", node.WorkDir, string(out))
-					}
+				if err := removeWorktree(node); err != nil {
+					log.Printf("[daemon] warning: %v", err)
 				}
 
 				killedIDs = append(killedIDs, node.ID)
@@ -213,6 +223,99 @@ var daemonStartCmd = &cobra.Command{
 		var monitor *relay.StatusMonitor
 		if wsPort > 0 {
 			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
+
+			// Serve repo registry for mobile create form
+			wsSrv.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
+				registry, err := core.LoadRepoRegistry(core.DefaultReposPath())
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				type repoEntry struct {
+					Name string `json:"name"`
+					Path string `json:"path"`
+				}
+				var repos []repoEntry
+				for _, repo := range registry.Repos {
+					repos = append(repos, repoEntry{Name: repo.Name, Path: repo.Path})
+				}
+				if repos == nil {
+					repos = []repoEntry{}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(repos)
+			})
+
+			// Accept image uploads from mobile — batch endpoint, saves to ~/.config/ws/uploads/
+			wsSrv.HandleFunc("/api/upload", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					http.Error(w, "POST only", http.StatusMethodNotAllowed)
+					return
+				}
+
+				// 50 MB max total for batch uploads
+				r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+				if err := r.ParseMultipartForm(50 << 20); err != nil {
+					http.Error(w, "file too large or invalid form", http.StatusBadRequest)
+					return
+				}
+
+				// Persistent upload directory
+				home, _ := os.UserHomeDir()
+				uploadDir := filepath.Join(home, ".config", "ws", "uploads")
+				if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+					http.Error(w, "create upload dir: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				// Accept multiple files under "images" field, fall back to single "image" for compat
+				files := r.MultipartForm.File["images"]
+				if len(files) == 0 {
+					files = r.MultipartForm.File["image"]
+				}
+				if len(files) == 0 {
+					http.Error(w, "missing 'images' field", http.StatusBadRequest)
+					return
+				}
+
+				var paths []string
+				for _, header := range files {
+					file, err := header.Open()
+					if err != nil {
+						http.Error(w, "open file: "+err.Error(), http.StatusBadRequest)
+						return
+					}
+
+					ext := filepath.Ext(header.Filename)
+					if ext == "" {
+						ext = ".png"
+					}
+
+					dest, err := os.CreateTemp(uploadDir, "img-*"+ext)
+					if err != nil {
+						file.Close()
+						http.Error(w, "create file: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+
+					if _, err := io.Copy(dest, file); err != nil {
+						file.Close()
+						dest.Close()
+						http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+					file.Close()
+					dest.Close()
+
+					log.Printf("[daemon] image uploaded: %s (%s)", dest.Name(), header.Filename)
+					paths = append(paths, dest.Name())
+				}
+
+				log.Printf("[daemon] upload complete: %d file(s) → %v", len(paths), paths)
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"paths": paths})
+			})
+
 			daemon.SetEventHandler(func(event relay.StreamEvent) {
 				wsSrv.NotifyStreams(event)
 				// Send push notification for idle transitions

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  Pressable,
   StyleSheet,
   ActivityIndicator,
   ScrollView,
@@ -14,6 +13,7 @@ import { useRelay } from './_layout';
 import { catppuccin } from '../lib/theme';
 import { parseGrimoireUri } from '../lib/relay-client';
 import { discoverDaemons, saveTailscaleConfig, type DiscoveredDaemon } from '../lib/discovery';
+import { AnimatedIconButton } from '../components/AnimatedIconButton';
 
 export default function ConnectScreen() {
   const { connected, connect, connectFromUri, config } = useRelay();
@@ -48,7 +48,7 @@ export default function ConnectScreen() {
   const handleDiscoveredConnect = async (daemon: DiscoveredDaemon) => {
     setLoading(true);
     setError('');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     if (daemon.type === 'tailscale') {
       saveTailscaleConfig({ host: daemon.host, port: daemon.port, token: daemon.token });
@@ -95,12 +95,12 @@ export default function ConnectScreen() {
         <View style={styles.container}>
           <Text style={styles.title}>Camera Permission</Text>
           <Text style={styles.subtitle}>We need camera access to scan QR codes.</Text>
-          <Pressable style={styles.button} onPress={requestPermission}>
+          <AnimatedIconButton style={styles.button} onPress={requestPermission} pressScale={0.97}>
             <Text style={styles.buttonText}>Grant Permission</Text>
-          </Pressable>
-          <Pressable style={styles.linkButton} onPress={() => setShowScanner(false)}>
+          </AnimatedIconButton>
+          <AnimatedIconButton style={styles.linkButton} onPress={() => setShowScanner(false)} pressScale={0.92}>
             <Text style={styles.linkText}>Back</Text>
-          </Pressable>
+          </AnimatedIconButton>
         </View>
       );
     }
@@ -119,9 +119,9 @@ export default function ConnectScreen() {
             onBarcodeScanned={(result) => handleQrScanned(result.data)}
           />
         </View>
-        <Pressable style={styles.linkButton} onPress={() => setShowScanner(false)}>
+        <AnimatedIconButton style={styles.linkButton} onPress={() => setShowScanner(false)} pressScale={0.92}>
           <Text style={styles.linkText}>Back</Text>
-        </Pressable>
+        </AnimatedIconButton>
       </View>
     );
   }
@@ -139,14 +139,12 @@ export default function ConnectScreen() {
         <View style={styles.discoveredSection}>
           <Text style={styles.sectionLabel}>Discovered</Text>
           {discovered.map((d) => (
-            <Pressable
+            <AnimatedIconButton
               key={d.host}
-              style={({ pressed }) => [
-                styles.discoveredItem,
-                pressed && styles.discoveredItemPressed,
-              ]}
+              style={styles.discoveredItem}
               onPress={() => handleDiscoveredConnect(d)}
               disabled={loading}
+              pressScale={0.97}
             >
               <View style={styles.discoveredDot} />
               <View style={styles.discoveredInfo}>
@@ -156,7 +154,7 @@ export default function ConnectScreen() {
                 </Text>
               </View>
               <Text style={styles.discoveredType}>{d.type}</Text>
-            </Pressable>
+            </AnimatedIconButton>
           ))}
         </View>
       )}
@@ -172,9 +170,9 @@ export default function ConnectScreen() {
         <Text style={styles.noDiscovered}>No daemons found on network</Text>
       )}
 
-      <Pressable style={styles.rescanButton} onPress={runDiscovery} disabled={scanning}>
+      <AnimatedIconButton style={styles.rescanButton} onPress={runDiscovery} disabled={scanning} pressScale={0.92}>
         <Text style={styles.rescanText}>Rescan</Text>
-      </Pressable>
+      </AnimatedIconButton>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -184,13 +182,14 @@ export default function ConnectScreen() {
         <View style={styles.dividerLine} />
       </View>
 
-      <Pressable
+      <AnimatedIconButton
         style={[styles.scanButton, loading && styles.buttonDisabled]}
         onPress={() => setShowScanner(true)}
         disabled={loading}
+        pressScale={0.97}
       >
         <Text style={styles.scanButtonText}>Scan QR Code</Text>
-      </Pressable>
+      </AnimatedIconButton>
     </ScrollView>
   );
 }
@@ -246,12 +245,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: catppuccin.surface0,
     borderRadius: 10,
+    borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 8,
-  },
-  discoveredItemPressed: {
-    backgroundColor: catppuccin.surface1,
   },
   discoveredDot: {
     width: 8,
@@ -322,6 +319,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   scanButtonText: {
     color: catppuccin.base,
@@ -333,6 +331,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 12,
+    borderCurve: 'continuous',
     marginTop: 8,
     width: '100%',
     alignItems: 'center',
@@ -361,6 +360,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 16,
+    borderCurve: 'continuous',
     overflow: 'hidden',
     marginBottom: 24,
   },

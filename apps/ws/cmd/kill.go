@@ -61,11 +61,8 @@ var killCmd = &cobra.Command{
 			}
 
 			// Remove git worktree (local only)
-			if node.Type == core.NodeTypeLocal {
-				gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
-				if out, err := gitRemove.CombinedOutput(); err != nil {
-					fmt.Printf("  Warning: could not remove worktree %s: %s\n", node.WorkDir, string(out))
-				}
+			if err := removeWorktree(node); err != nil {
+				fmt.Printf("  Warning: %v\n", err)
 			}
 
 			fmt.Printf("  Removed %s\n", node.ID)

@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Redirect } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { SymbolView } from 'expo-symbols';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
 
@@ -29,14 +29,14 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Streams',
-          tabBarIcon: ({ color }) => <FontAwesome name="sitemap" size={20} color={color} />,
+          tabBarIcon: ({ color }) => <SymbolView name="square.grid.2x2" size={20} tintColor={color} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
-          tabBarIcon: ({ color }) => <FontAwesome name="cog" size={20} color={color} />,
+          tabBarIcon: ({ color }) => <SymbolView name="gearshape" size={20} tintColor={color} />,
         }}
       />
     </Tabs>

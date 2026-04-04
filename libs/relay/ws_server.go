@@ -42,7 +42,7 @@ type StreamEvent struct {
 
 // PaneInputMsg is sent from the phone to write to a tmux pane.
 type PaneInputMsg struct {
-	Type string `json:"type"` // input, resize, special
+	Type string `json:"type"` // input, input_submit, resize, special
 	Data string `json:"data"` // text content or key name
 	Cols int    `json:"cols,omitempty"`
 	Rows int    `json:"rows,omitempty"`
@@ -69,6 +69,12 @@ func NewWSServer(daemon *Daemon, treePath string) *WSServer {
 // Token returns the auth token for QR code generation.
 func (ws *WSServer) Token() string {
 	return ws.token
+}
+
+// HandleFunc registers an additional HTTP handler on the server's mux.
+// The handler is wrapped with auth middleware.
+func (ws *WSServer) HandleFunc(pattern string, handler http.HandlerFunc) {
+	ws.mux.HandleFunc(pattern, ws.requireAuth(handler))
 }
 
 // Serve starts serving on an existing net.Listener. The listener can come from
@@ -331,6 +337,14 @@ func (ws *WSServer) handleRelay(w http.ResponseWriter, r *http.Request) {
 			writeJSON(ctx, conn, map[string]string{"error": err.Error()})
 			continue
 		}
+
+		// Enrich status responses with color/shader from state tree
+		if env.Action == "status" {
+			if agents, ok := resp.([]AgentStatus); ok {
+				resp = ws.enrichAgents(agents)
+			}
+		}
+
 		writeJSON(ctx, conn, resp)
 	}
 }
@@ -352,16 +366,15 @@ func (ws *WSServer) resolvePane(ref string) *AgentHandle {
 	return nil
 }
 
-func (ws *WSServer) dagSnapshot() (interface{}, error) {
-	agents := ws.daemon.ListAgents()
+// enrichedAgent embeds AgentStatus with display metadata from state.json.
+type enrichedAgent struct {
+	AgentStatus
+	Color  string `json:"color,omitempty"`
+	Shader string `json:"shader,omitempty"`
+}
 
-	type enrichedAgent struct {
-		AgentStatus
-		Color  string `json:"color,omitempty"`
-		Shader string `json:"shader,omitempty"`
-	}
-
-	// Load state tree for color/shader metadata
+// enrichAgents decorates a list of agents with color/shader from the state tree.
+func (ws *WSServer) enrichAgents(agents []AgentStatus) []enrichedAgent {
 	nodeColors := make(map[string]string)
 	nodeShaders := make(map[string]string)
 	if ws.treePath != "" {
@@ -381,14 +394,19 @@ func (ws *WSServer) dagSnapshot() (interface{}, error) {
 		}
 	}
 
-	var result []enrichedAgent
+	result := make([]enrichedAgent, 0, len(agents))
 	for _, a := range agents {
 		ea := enrichedAgent{AgentStatus: a}
 		ea.Color = nodeColors[a.ID]
 		ea.Shader = nodeShaders[a.ID]
 		result = append(result, ea)
 	}
-	return result, nil
+	return result
+}
+
+func (ws *WSServer) dagSnapshot() (interface{}, error) {
+	agents := ws.daemon.ListAgents()
+	return ws.enrichAgents(agents), nil
 }
 
 // firstPaneInSession returns the first pane ID in a tmux session.

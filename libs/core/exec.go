@@ -19,7 +19,7 @@ func RunOnHost(host string, name string, args ...string) *exec.Cmd {
 
 	remoteCmd := strings.Join(parts, " ")
 
-	return exec.Command("ssh", "-o", "BatchMode=yes", host, remoteCmd)
+	return exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, remoteCmd)
 }
 
 // RunOnHostInteractive builds an exec.Cmd for interactive SSH sessions (allocates a TTY).
@@ -29,7 +29,7 @@ func RunOnHostInteractive(host string, name string, args ...string) *exec.Cmd {
 		return exec.Command(name, args...)
 	}
 
-	sshArgs := []string{"-t", "-o", "BatchMode=yes", host, name}
+	sshArgs := []string{"-t", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, name}
 	sshArgs = append(sshArgs, args...)
 
 	return exec.Command("ssh", sshArgs...)

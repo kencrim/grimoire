@@ -4,8 +4,25 @@ import type {
   Envelope,
   PaneFrame,
   PaneInputMsg,
+  Skill,
   StreamEvent,
 } from './types';
+
+const MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.bmp': 'image/bmp',
+};
+
+function mimeFromFilename(filename: string): string {
+  const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+  return MIME_MAP[ext] ?? 'image/png';
+}
 
 type StreamsCallback = (event: StreamEvent) => void;
 type PaneCallback = (frame: PaneFrame) => void;
@@ -20,6 +37,7 @@ export class RelayClient {
   private relayWs: WebSocket | null = null;
   private activePaneRef: string | null = null;
   private activePaneType: 'agent' | 'terminal' = 'agent';
+  private paneGeneration = 0;
 
   private streamsCallbacks = new Set<StreamsCallback>();
   private paneCallbacks = new Set<PaneCallback>();
@@ -27,6 +45,7 @@ export class RelayClient {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private skillsCache = new Map<string, Skill[]>();
 
   constructor(config: ConnectionConfig) {
     this.config = config;
@@ -101,11 +120,13 @@ export class RelayClient {
     this.disconnectPane();
     this.activePaneRef = paneRef;
     this.activePaneType = paneType;
+    const gen = ++this.paneGeneration;
 
     const url = `${this.baseUrl}/ws/panes/${encodeURIComponent(paneRef)}?${this.authParam}&pane=${paneType}`;
     const ws = new WebSocket(url);
 
     ws.onmessage = (event) => {
+      if (gen !== this.paneGeneration) return;
       try {
         const data: PaneFrame = JSON.parse(event.data);
         for (const cb of this.paneCallbacks) {
@@ -117,10 +138,12 @@ export class RelayClient {
     };
 
     ws.onclose = () => {
+      if (gen !== this.paneGeneration) return;
       this.paneWs = null;
       // Auto-reconnect if we still have an active pane ref
       if (this.activePaneRef && !this.disposed) {
         this.scheduleReconnect(() => {
+          if (gen !== this.paneGeneration) return;
           if (this.activePaneRef) {
             this.connectPane(this.activePaneRef, this.activePaneType);
           }
@@ -136,6 +159,7 @@ export class RelayClient {
   }
 
   disconnectPane(): void {
+    this.paneGeneration++;
     this.activePaneRef = null;
     this.activePaneType = 'agent';
     if (this.paneWs) {
@@ -198,6 +222,21 @@ export class RelayClient {
     return resp as unknown as AgentStatus[];
   }
 
+  async getSkills(agentId: string): Promise<Skill[]> {
+    const cached = this.skillsCache.get(agentId);
+    if (cached) return cached;
+
+    const resp = await this.relay({
+      action: 'skills',
+      payload: { agent_id: agentId },
+    });
+    const skills = resp as unknown as Skill[];
+    if (Array.isArray(skills)) {
+      this.skillsCache.set(agentId, skills);
+    }
+    return skills;
+  }
+
   async killAgent(agentId: string): Promise<{ killed: string[]; status: string }> {
     const resp = await this.relay({
       action: 'kill',
@@ -211,6 +250,60 @@ export class RelayClient {
       action: 'send',
       payload: { from, to, type, content, time: new Date().toISOString() },
     });
+  }
+
+  async spawnAgent(opts: {
+    name: string;
+    repo?: string;
+    agent?: string;
+    task?: string;
+    parentId?: string;
+  }): Promise<{ agent_id: string; status: string }> {
+    const resp = await this.relay({
+      action: 'spawn',
+      payload: {
+        name: opts.name,
+        repo: opts.repo ?? '',
+        agent: opts.agent ?? 'claude',
+        task: opts.task ?? '',
+        parent_id: opts.parentId ?? '',
+      },
+    });
+    return resp as unknown as { agent_id: string; status: string };
+  }
+
+  async fetchRepos(): Promise<{ name: string; path: string }[]> {
+    const resp = await fetch(
+      `http://${this.config.host}:${this.config.port}/api/repos?${this.authParam}`,
+    );
+    return resp.json();
+  }
+
+  async uploadImages(
+    assets: { uri: string; fileName: string; mimeType?: string }[],
+  ): Promise<string[]> {
+    const formData = new FormData();
+
+    for (const asset of assets) {
+      const mimeType = asset.mimeType ?? mimeFromFilename(asset.fileName);
+      formData.append('images', {
+        uri: asset.uri,
+        name: asset.fileName,
+        type: mimeType,
+      });
+    }
+
+    const resp = await fetch(
+      `http://${this.config.host}:${this.config.port}/api/upload?${this.authParam}`,
+      { method: 'POST', body: formData },
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Upload failed: ${resp.status}`);
+    }
+
+    const data: { paths: string[] } = await resp.json();
+    return data.paths;
   }
 
   // --- Lifecycle ---

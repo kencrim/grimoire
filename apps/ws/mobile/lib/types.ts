@@ -25,7 +25,7 @@ export interface PaneFrame {
 }
 
 export interface PaneInputMsg {
-  type: 'input' | 'special' | 'resize';
+  type: 'input' | 'input_submit' | 'special' | 'resize';
   data: string;
   cols?: number;
   rows?: number;
@@ -34,6 +34,13 @@ export interface PaneInputMsg {
 export interface Envelope {
   action: 'send' | 'spawn' | 'status' | 'kill' | 'register' | 'unregister';
   payload: Record<string, unknown>;
+}
+
+export interface Skill {
+  name: string;
+  description: string;
+  source: 'plugin' | 'project' | 'user';
+  argument_hint?: string;
 }
 
 export interface ConnectionConfig {

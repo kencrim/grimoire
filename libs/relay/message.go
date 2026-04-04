@@ -23,12 +23,15 @@ type Message struct {
 	Time    time.Time   `json:"time"`
 }
 
-// SpawnRequest asks the daemon to create a child agent.
+// SpawnRequest asks the daemon to create an agent.
+// ParentID is optional — omit it for root workstreams.
 type SpawnRequest struct {
-	ParentID string `json:"parent_id"`
+	ParentID string `json:"parent_id,omitempty"`
 	Name     string `json:"name"`
 	Task     string `json:"task"`
 	Context  string `json:"context,omitempty"`
+	Repo     string `json:"repo,omitempty"`  // repo registry name (for root workstreams)
+	Agent    string `json:"agent,omitempty"` // claude, amp, codex (default: claude)
 }
 
 // SpawnResponse is returned after spawning a child.
@@ -51,6 +54,19 @@ type AgentStatus struct {
 	ParentID string `json:"parent_id,omitempty"`
 	Session  string `json:"session,omitempty"`
 	PaneID   string `json:"pane_id,omitempty"`
+}
+
+// SkillsRequest asks for available slash commands for an agent.
+type SkillsRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// Skill represents a slash command available to an agent.
+type Skill struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Source       string `json:"source"`                  // plugin, project, user
+	ArgumentHint string `json:"argument_hint,omitempty"` // e.g. "<phase-number>", "[optional description]"
 }
 
 // KillRequest asks the daemon to terminate an agent and its descendants.

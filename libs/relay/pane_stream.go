@@ -27,6 +27,41 @@ type PaneFrame struct {
 	Scrolled int    `json:"scrolled"` // -1 = full snapshot, 0 = in-place update, >0 = lines scrolled off top
 }
 
+// waitForPrompt waits for the target pane's cursor to settle on a prompt-like line.
+// This prevents rapid-fire input_submit calls from piling keys into tmux faster
+// than the application (e.g. Claude Code) can consume them.
+func (ps *PaneStreamer) waitForPrompt() {
+	// Poll the pane's cursor line until it looks like a prompt or we timeout.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		cmd := runOnHost(ps.host, "tmux", "capture-pane", "-t", ps.target, "-p", "-T")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		// Check all lines for common prompt indicators.
+		// Claude Code's prompt line is "❯" followed by spaces and the Rustmurmur owl,
+		// so we check if any line starts with a prompt character.
+		lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+		for _, line := range lines {
+			stripped := strings.TrimSpace(stripAnsi(line))
+			if stripped == "" {
+				continue
+			}
+			if strings.HasPrefix(stripped, "❯") ||
+				strings.HasPrefix(stripped, "$ ") || stripped == "$" ||
+				strings.HasPrefix(stripped, "> ") || stripped == ">" ||
+				strings.HasPrefix(stripped, "% ") || stripped == "%" {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Timeout — proceed anyway to avoid hanging forever
+	log.Printf("[pane-stream] waitForPrompt: timed out after 5s for target %s", ps.target)
+}
+
 // NewPaneStreamer creates a streamer for a tmux pane.
 // For remote panes, the polling rate is reduced to ~3fps to account for SSH overhead.
 func NewPaneStreamer(target string, host string) *PaneStreamer {
@@ -230,6 +265,33 @@ func (ps *PaneStreamer) HandleInput(input PaneInputMsg) error {
 			log.Printf("[pane-stream] send-keys -l error: %s", string(out))
 			return err
 		}
+
+	case "input_submit":
+		// Send text + Enter, then wait for the application to show a prompt again
+		// before returning. This prevents the next queued input_submit from typing
+		// into a pane that hasn't finished processing the previous Enter.
+		if input.Data == "" {
+			return nil
+		}
+		log.Printf("[pane-stream] input_submit: target=%s len=%d data=%q", ps.target, len(input.Data), input.Data)
+
+		cmd := runOnHost(ps.host, "tmux", "send-keys", "-l", "-t", ps.target, input.Data)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[pane-stream] send-keys -l error: %s", string(out))
+			return err
+		}
+		enterCmd := runOnHost(ps.host, "tmux", "send-keys", "-t", ps.target, "Enter")
+		if out, err := enterCmd.CombinedOutput(); err != nil {
+			log.Printf("[pane-stream] send-keys Enter error: %s", string(out))
+			return err
+		}
+		log.Printf("[pane-stream] input_submit: sent, waiting for prompt")
+
+		// First wait briefly for the pane to start processing (prompt disappears)
+		time.Sleep(200 * time.Millisecond)
+		// Then wait for prompt to reappear
+		ps.waitForPrompt()
+		log.Printf("[pane-stream] input_submit: prompt detected, ready for next")
 
 	case "special":
 		if input.Data == "" {

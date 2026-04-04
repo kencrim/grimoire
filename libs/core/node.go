@@ -30,8 +30,9 @@ type Node struct {
 	Type      NodeType   `json:"type"`
 	Status    NodeStatus `json:"status"`
 	Agent     string     `json:"agent,omitempty"`  // claude, amp, codex
-	WorkDir   string     `json:"work_dir"`         // Worktree or workspace path
-	Session   string     `json:"session"`          // tmux session name
+	WorkDir   string     `json:"work_dir"`                  // Worktree or workspace path
+	RepoDir   string     `json:"repo_dir,omitempty"`        // Git repo root that owns this worktree
+	Session   string     `json:"session"`                   // tmux session name
 	PaneID    string     `json:"pane_id,omitempty"` // tmux pane ID (e.g. %5)
 	Color     string     `json:"color,omitempty"`   // Border color for tmux pane
 	Shader    string     `json:"shader,omitempty"`  // Background shader name

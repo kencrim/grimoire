@@ -1,14 +1,17 @@
 import { View, StyleSheet, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { router } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
+import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { StreamTreeItem } from '../../components/StreamTree';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
 import type { AgentStatus, StreamNode } from '../../lib/types';
 import { useCallback, useMemo, useState } from 'react';
 
 export default function StreamsScreen() {
-  const { agents, connected, config, refreshAgents } = useRelay();
+  const { agents, connected, config, refreshAgents, client } = useRelay();
   const [refreshing, setRefreshing] = useState(false);
 
   // Build tree from flat agent list
@@ -25,7 +28,9 @@ export default function StreamsScreen() {
       <ConnectionBanner connected={connected} host={config?.host} port={config?.port} />
       <FlashList
         data={flatNodes}
-        renderItem={({ item }) => <StreamTreeItem node={item} />}
+        renderItem={({ item }) => (
+          <StreamTreeItem node={item} onKill={(id) => client?.killAgent(id)} />
+        )}
         estimatedItemSize={56}
         keyExtractor={(item) => item.id}
         refreshControl={
@@ -37,6 +42,9 @@ export default function StreamsScreen() {
         }
         contentContainerStyle={styles.listContent}
       />
+      <AnimatedIconButton style={styles.fab} onPress={() => router.push('/create')}>
+        <SymbolView name="plus" size={24} tintColor={catppuccin.base} />
+      </AnimatedIconButton>
     </View>
   );
 }
@@ -88,5 +96,22 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderCurve: 'continuous',
+    backgroundColor: catppuccin.lavender,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
   },
 });
