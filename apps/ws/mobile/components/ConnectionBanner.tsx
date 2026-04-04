@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 
 interface ConnectionBannerProps {
   connected: boolean;
@@ -31,10 +31,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   bannerConnected: {
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
   },
   bannerDisconnected: {
-    backgroundColor: catppuccin.surface0,
+    backgroundColor: hex.surface0,
   },
   dot: {
     width: 6,
@@ -42,13 +42,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   dotGreen: {
-    backgroundColor: catppuccin.green,
+    backgroundColor: hex.green,
   },
   dotRed: {
-    backgroundColor: catppuccin.red,
+    backgroundColor: hex.red,
   },
   text: {
     fontSize: 12,
-    color: catppuccin.subtext0,
+    fontFamily: 'JetBrainsMono_400Regular',
+    color: hex.subtext0,
   },
 });

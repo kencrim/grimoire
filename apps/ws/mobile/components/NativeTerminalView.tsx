@@ -7,7 +7,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { parseTerminalContent, type ParsedLine } from '../lib/ansi-native';
 import type { PaneFrame } from '../lib/types';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 
 const MAX_BUFFER_LINES = 5000;
 
@@ -177,16 +177,16 @@ const TerminalLine = memo(function TerminalLine({ line }: { line: ParsedLine }) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
   },
   scrollContent: {
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
   line: {
-    fontFamily: 'Menlo',
+    fontFamily: 'JetBrainsMono_400Regular',
     fontSize: 13,
     lineHeight: 18,
-    color: catppuccin.text,
+    color: hex.text,
   },
 });

@@ -6,7 +6,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 
 export interface ActionSheetItem {
   label: string;
@@ -68,10 +68,10 @@ export const ActionSheet = forwardRef<BottomSheetModal, ActionSheetProps>(
 
 const styles = StyleSheet.create({
   background: {
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
   },
   handle: {
-    backgroundColor: catppuccin.surface2,
+    backgroundColor: hex.surface2,
   },
   content: {
     paddingHorizontal: 16,
@@ -80,25 +80,24 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
     textAlign: 'center',
     marginBottom: 12,
   },
   item: {
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    borderRadius: 0,
   },
   itemPressed: {
-    backgroundColor: catppuccin.surface0,
+    backgroundColor: hex.surface0,
   },
   itemText: {
     fontSize: 16,
-    color: catppuccin.text,
+    color: hex.text,
   },
   itemTextDestructive: {
-    color: catppuccin.red,
+    color: hex.red,
   },
   spacer: {
     height: 8,

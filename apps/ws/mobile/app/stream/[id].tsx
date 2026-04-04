@@ -26,7 +26,7 @@ import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { SkillsSheet } from '../../components/SkillsSheet';
 import { NativeTerminalView, type NativeTerminalHandle } from '../../components/NativeTerminalView';
 import type { Skill } from '../../lib/types';
-import { catppuccin } from '../../lib/theme';
+import { hex } from '../../lib/theme';
 
 type PaneTab = 'agent' | 'terminal';
 
@@ -217,10 +217,10 @@ export default function StreamScreen() {
 
   const statusColor =
     agent?.status === 'alive'
-      ? catppuccin.green
+      ? hex.green
       : agent?.status === 'idle'
-        ? catppuccin.yellow
-        : catppuccin.overlay0;
+        ? hex.yellow
+        : hex.overlay0;
 
   return (
     <KeyboardAvoidingView
@@ -324,7 +324,7 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
                   onPress={() => removeImage(i)}
                   hitSlop={6}
                 >
-                  <SymbolView name="xmark.circle.fill" size={18} tintColor={catppuccin.red} />
+                  <SymbolView name="xmark.circle.fill" size={18} tintColor={hex.red} />
                 </Pressable>
               </View>
             ))}
@@ -337,7 +337,7 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
             value={inputText}
             onChangeText={setInputText}
             placeholder="Message..."
-            placeholderTextColor={catppuccin.overlay0}
+            placeholderTextColor={hex.overlay0}
             autoCapitalize="none"
             autoCorrect={false}
             multiline
@@ -349,10 +349,10 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
         <View style={styles.actionsRow}>
           <View style={styles.actionsLeft}>
             <AnimatedIconButton onPress={handleImagePick} hitSlop={8} style={styles.attachButton}>
-              <SymbolView name="plus" size={18} tintColor={catppuccin.overlay1} />
+              <SymbolView name="plus" size={18} tintColor={hex.overlay1} />
             </AnimatedIconButton>
             <AnimatedIconButton onPress={handleSkills} hitSlop={8} style={styles.skillsButton}>
-              <SymbolView name="sparkles" size={18} tintColor={catppuccin.overlay1} />
+              <SymbolView name="sparkles" size={18} tintColor={hex.overlay1} />
             </AnimatedIconButton>
           </View>
           <View style={styles.actionsRight}>
@@ -364,7 +364,7 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
               <SymbolView
                 name="mic.fill"
                 size={18}
-                tintColor={recognizing ? catppuccin.red : catppuccin.overlay1}
+                tintColor={recognizing ? hex.red : hex.overlay1}
                 animationSpec={{ effect: { type: 'bounce' } }}
               />
             </AnimatedIconButton>
@@ -376,7 +376,7 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
               <SymbolView
                 name="arrow.up"
                 size={16}
-                tintColor={hasContent ? catppuccin.base : catppuccin.surface2}
+                tintColor={hasContent ? hex.base : hex.surface2}
               />
             </AnimatedIconButton>
           </View>
@@ -390,16 +390,16 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
   },
   terminal: {
     flex: 1,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: catppuccin.surface0,
+    borderTopColor: hex.surface0,
   },
   tab: {
     flex: 1,
@@ -408,21 +408,21 @@ const styles = StyleSheet.create({
   },
   tabActive: {
     borderBottomWidth: 2,
-    borderBottomColor: catppuccin.lavender,
+    borderBottomColor: hex.accent,
   },
   tabText: {
     fontSize: 13,
-    fontWeight: '500',
-    color: catppuccin.overlay0,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: hex.overlay0,
   },
   tabTextActive: {
-    color: catppuccin.lavender,
+    color: hex.accent,
   },
   // Compose area
   compose: {
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: catppuccin.surface0,
+    borderTopColor: hex.surface0,
     paddingHorizontal: 16,
   },
   thumbnailRow: {
@@ -438,36 +438,33 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: 56,
     height: 56,
-    borderRadius: 8,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     overflow: 'visible',
   },
   thumbnailImage: {
     width: 56,
     height: 56,
-    borderRadius: 8,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: catppuccin.surface2,
+    borderColor: hex.surface2,
   },
   thumbnailRemove: {
     position: 'absolute',
     top: -6,
     right: -6,
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
     borderRadius: 9,
     borderCurve: 'continuous',
   },
   inputWrapper: {
     marginTop: 12,
     borderWidth: 1,
-    borderColor: catppuccin.surface2,
-    borderRadius: 22,
-    borderCurve: 'continuous',
+    borderColor: hex.surface2,
+    borderRadius: 0,
     backgroundColor: 'transparent',
   },
   input: {
-    color: catppuccin.text,
+    color: hex.text,
     paddingHorizontal: 18,
     paddingTop: 12,
     paddingBottom: 12,
@@ -493,7 +490,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: catppuccin.surface2,
+    borderColor: hex.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -503,7 +500,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: catppuccin.surface2,
+    borderColor: hex.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -518,12 +515,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: catppuccin.surface2,
+    borderColor: hex.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   micButtonActive: {
-    borderColor: catppuccin.red,
+    borderColor: hex.red,
     backgroundColor: 'rgba(243, 139, 168, 0.15)',
   },
   sendButton: {
@@ -531,11 +528,11 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderCurve: 'continuous',
-    backgroundColor: catppuccin.lavender,
+    backgroundColor: hex.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: catppuccin.surface0,
+    backgroundColor: hex.surface0,
   },
 });

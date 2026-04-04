@@ -1,21 +1,22 @@
 {
   "expo": {
-    "name": "Grimoire",
-    "slug": "grimoire-mobile",
+    "name": "Hex",
+    "slug": "hex-app",
     "version": "0.1.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "grimoire",
+    "scheme": "hex",
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.grimoire.mobile",
+      "bundleIdentifier": "com.hex.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Grimoire needs camera access to scan QR codes for daemon pairing.",
-        "NSLocalNetworkUsageDescription": "Grimoire uses local network to discover relay daemons.",
-        "NSBonjourServices": ["_grimoire._tcp."],
-        "NSMicrophoneUsageDescription": "Grimoire uses the microphone for voice-to-text input.",
-        "NSSpeechRecognitionUsageDescription": "Grimoire uses speech recognition to transcribe voice input."
+        "NSCameraUsageDescription": "Hex needs camera access to scan QR codes for daemon pairing.",
+        "NSLocalNetworkUsageDescription": "Hex uses local network to discover relay daemons.",
+        "NSBonjourServices": ["_hex._tcp."],
+        "NSMicrophoneUsageDescription": "Hex uses the microphone for voice-to-text input.",
+        "NSSpeechRecognitionUsageDescription": "Hex uses speech recognition to transcribe voice input."
       }
     },
     "android": {
@@ -23,7 +24,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1e1e2e"
       },
-      "package": "com.grimoire.mobile"
+      "package": "com.hex.app"
     },
     "plugins": [
       "expo-router",
@@ -31,20 +32,20 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Grimoire needs camera access to scan QR codes for daemon pairing."
+          "cameraPermission": "Hex needs camera access to scan QR codes for daemon pairing."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Grimoire needs photo access to send images to agents."
+          "photosPermission": "Hex needs photo access to send images to agents."
         }
       ],
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Grimoire uses the microphone for voice-to-text input.",
-          "speechRecognitionPermission": "Grimoire uses speech recognition to transcribe voice input."
+          "microphonePermission": "Hex uses the microphone for voice-to-text input.",
+          "speechRecognitionPermission": "Hex uses speech recognition to transcribe voice input."
         }
       ]
     ]

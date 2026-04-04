@@ -10,8 +10,8 @@ import { Redirect } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { useRelay } from './_layout';
-import { catppuccin } from '../lib/theme';
-import { parseGrimoireUri } from '../lib/relay-client';
+import { hex } from '../lib/theme';
+import { parseHexUri } from '../lib/relay-client';
 import { discoverDaemons, saveTailscaleConfig, type DiscoveredDaemon } from '../lib/discovery';
 import { AnimatedIconButton } from '../components/AnimatedIconButton';
 
@@ -71,9 +71,9 @@ export default function ConnectScreen() {
     setLoading(true);
     setError('');
 
-    const parsed = parseGrimoireUri(data);
+    const parsed = parseHexUri(data);
     if (!parsed) {
-      setError('Invalid QR code. Expected grimoire:// URI.');
+      setError('Invalid QR code. Expected hex:// URI.');
       setLoading(false);
       return;
     }
@@ -131,7 +131,7 @@ export default function ConnectScreen() {
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.logo}>grimoire</Text>
+      <Text style={styles.logo}>hex</Text>
       <Text style={styles.subtitle}>Connect to your relay daemon</Text>
 
       {/* Discovered daemons */}
@@ -161,7 +161,7 @@ export default function ConnectScreen() {
 
       {scanning && (
         <View style={styles.scanningRow}>
-          <ActivityIndicator size="small" color={catppuccin.lavender} />
+          <ActivityIndicator size="small" color={hex.accent} />
           <Text style={styles.scanningText}>Scanning network...</Text>
         </View>
       )}
@@ -197,7 +197,7 @@ export default function ConnectScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -211,19 +211,21 @@ const styles = StyleSheet.create({
   },
   logo: {
     fontSize: 32,
-    fontWeight: '700',
-    color: catppuccin.lavender,
+    fontFamily: 'SpaceGrotesk_700Bold',
+    color: hex.accent,
+    letterSpacing: -0.5,
     marginBottom: 6,
   },
   title: {
     fontSize: 24,
-    fontWeight: '700',
-    color: catppuccin.text,
+    fontFamily: 'SpaceGrotesk_700Bold',
+    color: hex.text,
+    letterSpacing: -0.5,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
     textAlign: 'center',
     marginBottom: 32,
   },
@@ -233,8 +235,8 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: catppuccin.subtext0,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: hex.subtext0,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
@@ -243,9 +245,8 @@ const styles = StyleSheet.create({
   discoveredItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: catppuccin.surface0,
-    borderRadius: 10,
-    borderCurve: 'continuous',
+    backgroundColor: hex.surface0,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 8,
@@ -254,7 +255,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: catppuccin.green,
+    backgroundColor: hex.green,
     marginRight: 10,
   },
   discoveredInfo: {
@@ -263,17 +264,17 @@ const styles = StyleSheet.create({
   discoveredLabel: {
     fontSize: 15,
     fontWeight: '500',
-    color: catppuccin.text,
+    color: hex.text,
   },
   discoveredHost: {
     fontSize: 12,
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
     marginTop: 2,
-    fontFamily: 'Menlo',
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   discoveredType: {
     fontSize: 11,
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     textTransform: 'uppercase',
   },
   scanningRow: {
@@ -284,11 +285,11 @@ const styles = StyleSheet.create({
   },
   scanningText: {
     fontSize: 13,
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
   },
   noDiscovered: {
     fontSize: 13,
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     marginBottom: 8,
   },
   rescanButton: {
@@ -296,7 +297,7 @@ const styles = StyleSheet.create({
   },
   rescanText: {
     fontSize: 14,
-    color: catppuccin.lavender,
+    color: hex.accent,
   },
   divider: {
     flexDirection: 'row',
@@ -307,31 +308,29 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: catppuccin.surface1,
+    backgroundColor: hex.surface1,
   },
   dividerText: {
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     fontSize: 12,
     marginHorizontal: 12,
   },
   scanButton: {
-    backgroundColor: catppuccin.lavender,
+    backgroundColor: hex.accent,
     paddingHorizontal: 32,
     paddingVertical: 14,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    borderRadius: 0,
   },
   scanButtonText: {
-    color: catppuccin.base,
+    color: hex.base,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   button: {
-    backgroundColor: catppuccin.lavender,
+    backgroundColor: hex.accent,
     paddingHorizontal: 32,
     paddingVertical: 14,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     marginTop: 8,
     width: '100%',
     alignItems: 'center',
@@ -340,27 +339,26 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: catppuccin.base,
+    color: hex.base,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   linkButton: {
     marginTop: 16,
   },
   linkText: {
-    color: catppuccin.lavender,
+    color: hex.accent,
     fontSize: 14,
   },
   error: {
-    color: catppuccin.red,
+    color: hex.red,
     fontSize: 13,
     marginBottom: 12,
   },
   cameraContainer: {
     width: 280,
     height: 280,
-    borderRadius: 16,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     overflow: 'hidden',
     marginBottom: 24,
   },

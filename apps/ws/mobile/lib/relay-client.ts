@@ -343,11 +343,11 @@ export async function checkDaemonHealth(config: ConnectionConfig): Promise<boole
   }
 }
 
-// --- Parse grimoire:// URI from QR code ---
+// --- Parse hex:// URI from QR code ---
 
-export function parseGrimoireUri(uri: string): ConnectionConfig | null {
-  // grimoire://192.168.1.5:8077?token=abc123...
-  const match = uri.match(/^grimoire:\/\/([^:]+):(\d+)\?token=(.+)$/);
+export function parseHexUri(uri: string): ConnectionConfig | null {
+  // hex://192.168.1.5:8077?token=abc123...
+  const match = uri.match(/^hex:\/\/([^:]+):(\d+)\?token=(.+)$/);
   if (!match) return null;
   return {
     host: match[1],

@@ -471,7 +471,7 @@ var daemonStatusCmd = &cobra.Command{
 
 var daemonConnectCmd = &cobra.Command{
 	Use:   "connect",
-	Short: "Show QR code and connection details for Grimoire Mobile",
+	Short: "Show QR code and connection details for Hex",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check daemon is running
 		socketPath := relay.DefaultSocketPath()
@@ -535,7 +535,7 @@ var daemonConnectCmd = &cobra.Command{
 			primaryIP = tailscaleIP
 		}
 
-		uri := fmt.Sprintf("grimoire://%s:%d?token=%s", primaryIP, port, token)
+		uri := fmt.Sprintf("hex://%s:%d?token=%s", primaryIP, port, token)
 
 		// Generate QR code
 		qr, err := qrcode.New(uri, qrcode.Medium)
@@ -545,7 +545,7 @@ var daemonConnectCmd = &cobra.Command{
 
 		// Print everything to stdout
 		fmt.Println()
-		fmt.Println("  Scan with Grimoire Mobile:")
+		fmt.Println("  Scan with Hex:")
 		fmt.Println()
 		fmt.Print(qr.ToSmallString(false))
 		fmt.Println()
@@ -564,7 +564,7 @@ var daemonConnectCmd = &cobra.Command{
 		for _, ip := range lanIPs {
 			fmt.Printf("  LAN:        %s:%d\n", ip, port)
 		}
-		fmt.Printf("  mDNS:       _grimoire._tcp (auto-discovered on LAN)\n")
+		fmt.Printf("  mDNS:       _hex._tcp (auto-discovered on LAN)\n")
 		fmt.Println()
 		fmt.Printf("  Token:      %s\n", token)
 		fmt.Println()
@@ -578,7 +578,7 @@ func init() {
 	daemonStartCmd.Flags().MarkHidden("foreground")
 	daemonStartCmd.Flags().Int("ws-port", 8077, "Port for WebSocket server (0 = disabled)")
 	daemonStartCmd.Flags().Bool("tsnet", false, "Enable embedded Tailscale node for remote access")
-	daemonStartCmd.Flags().String("tsnet-hostname", "grimoire", "Hostname for the tsnet node on the tailnet")
+	daemonStartCmd.Flags().String("tsnet-hostname", "hex", "Hostname for the tsnet node on the tailnet")
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)

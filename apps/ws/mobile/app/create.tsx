@@ -12,7 +12,7 @@ import {
 import { Stack, router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useRelay } from './_layout';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 import { AnimatedIconButton } from '../components/AnimatedIconButton';
 
 const AGENTS = ['claude', 'amp', 'codex'] as const;
@@ -88,7 +88,7 @@ export default function CreateScreen() {
               pressScale={0.92}
             >
               {loading ? (
-                <ActivityIndicator size="small" color={catppuccin.lavender} />
+                <ActivityIndicator size="small" color={hex.accent} />
               ) : (
                 <Text style={styles.createButton}>Create</Text>
               )}
@@ -108,7 +108,7 @@ export default function CreateScreen() {
           value={name}
           onChangeText={setName}
           placeholder="e.g. auth-refactor"
-          placeholderTextColor={catppuccin.overlay0}
+          placeholderTextColor={hex.overlay0}
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
@@ -119,7 +119,7 @@ export default function CreateScreen() {
         {loadingRepos ? (
           <ActivityIndicator
             size="small"
-            color={catppuccin.lavender}
+            color={hex.accent}
             style={styles.repoLoader}
           />
         ) : repos.length === 0 ? (
@@ -183,7 +183,7 @@ export default function CreateScreen() {
           value={task}
           onChangeText={setTask}
           placeholder="Describe what the agent should work on..."
-          placeholderTextColor={catppuccin.overlay0}
+          placeholderTextColor={hex.overlay0}
           multiline
           textAlignVertical="top"
         />
@@ -195,7 +195,7 @@ export default function CreateScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
   },
   form: {
     padding: 20,
@@ -203,22 +203,21 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 13,
-    fontWeight: '600',
-    color: catppuccin.subtext0,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: hex.subtext0,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginTop: 16,
     marginBottom: 4,
   },
   input: {
-    backgroundColor: catppuccin.surface0,
-    color: catppuccin.text,
-    borderRadius: 10,
-    borderCurve: 'continuous',
+    backgroundColor: hex.surface0,
+    color: hex.text,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    fontFamily: 'Menlo',
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   taskInput: {
     minHeight: 100,
@@ -231,27 +230,26 @@ const styles = StyleSheet.create({
   },
   chip: {
     borderWidth: 1,
-    borderColor: catppuccin.surface2,
-    borderRadius: 8,
-    borderCurve: 'continuous',
+    borderColor: hex.surface2,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   chipSelected: {
-    borderColor: catppuccin.lavender,
-    backgroundColor: catppuccin.lavender + '20',
+    borderColor: hex.accent,
+    backgroundColor: hex.accent + '20',
   },
   chipText: {
     fontSize: 14,
     fontWeight: '500',
-    color: catppuccin.overlay1,
+    color: hex.overlay1,
   },
   chipTextSelected: {
-    color: catppuccin.lavender,
+    color: hex.accent,
   },
   hint: {
     fontSize: 13,
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     fontStyle: 'italic',
   },
   repoLoader: {
@@ -265,7 +263,7 @@ const styles = StyleSheet.create({
   createButton: {
     fontSize: 16,
     fontWeight: '600',
-    color: catppuccin.lavender,
+    color: hex.accent,
   },
   createButtonDisabled: {
     opacity: 0.4,

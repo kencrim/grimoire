@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, ActionSheetIOS, Alert } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 import { AnimatedIconButton } from './AnimatedIconButton';
 import type { StreamNode } from '../lib/types';
 
@@ -11,12 +11,12 @@ interface StreamTreeItemProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  alive: catppuccin.green,
-  running: catppuccin.green,
-  idle: catppuccin.yellow,
-  exited: catppuccin.overlay0,
-  blocked: catppuccin.red,
-  done: catppuccin.blue,
+  alive: hex.green,
+  running: hex.green,
+  idle: hex.yellow,
+  exited: hex.overlay0,
+  blocked: hex.red,
+  done: hex.blue,
 };
 
 const AGENT_LABELS: Record<string, string> = {
@@ -64,7 +64,7 @@ export function showWorkstreamActions(
 }
 
 export function StreamTreeItem({ node, onKill }: StreamTreeItemProps) {
-  const statusColor = node.color ?? STATUS_COLORS[node.status] ?? catppuccin.overlay0;
+  const statusColor = node.color ?? STATUS_COLORS[node.status] ?? hex.overlay0;
 
   const handlePress = () => {
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -123,16 +123,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 4,
-    borderRadius: 8,
-    borderCurve: 'continuous',
+    borderRadius: 0,
   },
   connector: {
     marginRight: 4,
   },
   connectorText: {
-    color: catppuccin.surface2,
+    color: hex.surface2,
     fontSize: 12,
-    fontFamily: 'Menlo',
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   dot: {
     width: 10,
@@ -142,8 +141,8 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 16,
-    fontWeight: '500',
-    color: catppuccin.text,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: hex.text,
     flexShrink: 1,
   },
   spacer: {
@@ -151,13 +150,12 @@ const styles = StyleSheet.create({
   },
   badge: {
     borderWidth: 1,
-    borderRadius: 6,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   badgeText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontFamily: 'JetBrainsMono_500Medium',
   },
 });

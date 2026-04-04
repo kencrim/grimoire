@@ -72,7 +72,7 @@ export function toPaneInput(msg: FromWebView): PaneInputMsg | null {
   }
 }
 
-// Generate the xterm.js HTML with the Catppuccin Mocha theme baked in
+// Generate the xterm.js HTML with the Hex theme baked in
 export function generateXtermHtml(): string {
   const themeJson = JSON.stringify(xtermTheme);
 
@@ -108,7 +108,7 @@ export function generateXtermHtml(): string {
 
   const term = new Terminal({
     fontSize: 16,
-    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    fontFamily: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
     scrollback: 1000,
     scrollSensitivity: 3,
     smoothScrollDuration: 100,

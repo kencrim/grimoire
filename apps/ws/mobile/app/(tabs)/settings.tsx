@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useRelay } from '../_layout';
-import { catppuccin } from '../../lib/theme';
+import { hex } from '../../lib/theme';
 import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 
 export default function SettingsScreen() {
@@ -68,7 +68,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.label}>App</Text>
-            <Text style={styles.value}>Grimoire Mobile</Text>
+            <Text style={styles.value}>Hex</Text>
           </View>
           <View style={styles.separator} />
           <View style={styles.row}>
@@ -84,7 +84,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
     padding: 16,
   },
   section: {
@@ -92,17 +92,16 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 13,
-    fontWeight: '600',
-    color: catppuccin.subtext0,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: hex.subtext0,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
     marginLeft: 4,
   },
   card: {
-    backgroundColor: catppuccin.surface0,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    backgroundColor: hex.surface0,
+    borderRadius: 0,
     overflow: 'hidden',
   },
   row: {
@@ -114,11 +113,13 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 15,
-    color: catppuccin.text,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    color: hex.text,
   },
   value: {
-    fontSize: 15,
-    color: catppuccin.subtext0,
+    fontSize: 13,
+    fontFamily: 'JetBrainsMono_400Regular',
+    color: hex.subtext0,
   },
   statusRow: {
     flexDirection: 'row',
@@ -131,32 +132,31 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   dotGreen: {
-    backgroundColor: catppuccin.green,
+    backgroundColor: hex.green,
   },
   dotRed: {
-    backgroundColor: catppuccin.red,
+    backgroundColor: hex.red,
   },
   separator: {
     height: 1,
-    backgroundColor: catppuccin.surface1,
+    backgroundColor: hex.surface1,
     marginLeft: 16,
   },
   disconnectButton: {
-    backgroundColor: catppuccin.surface0,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    backgroundColor: hex.surface0,
+    borderRadius: 0,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 24,
   },
   disconnectText: {
-    color: catppuccin.red,
+    color: hex.red,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   reconnectText: {
-    color: catppuccin.lavender,
+    color: hex.accent,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
 });

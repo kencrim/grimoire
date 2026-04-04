@@ -8,7 +8,7 @@ import {
 import type { BottomSheetBackdropProps } from '@gorhom/bottom-sheet';
 import { forwardRef } from 'react';
 import { SymbolView } from 'expo-symbols';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 import { AnimatedIconButton } from './AnimatedIconButton';
 import type { Skill } from '../lib/types';
 
@@ -105,7 +105,7 @@ export const SkillsSheet = forwardRef<BottomSheetModal, SkillsSheetProps>(
           <View style={styles.argContainer}>
             <View style={styles.argHeader}>
               <AnimatedIconButton onPress={handleBack} style={styles.backButton} pressScale={0.85}>
-                <SymbolView name="chevron.left" size={16} tintColor={catppuccin.lavender} />
+                <SymbolView name="chevron.left" size={16} tintColor={hex.accent} />
               </AnimatedIconButton>
               <View style={styles.argTitleWrap}>
                 <Text style={styles.argTitle}>/{activeSkill.name}</Text>
@@ -120,7 +120,7 @@ export const SkillsSheet = forwardRef<BottomSheetModal, SkillsSheetProps>(
                 value={argument}
                 onChangeText={setArgument}
                 placeholder={activeSkill.argument_hint ?? 'Enter argument...'}
-                placeholderTextColor={catppuccin.overlay0}
+                placeholderTextColor={hex.overlay0}
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoFocus
@@ -131,7 +131,7 @@ export const SkillsSheet = forwardRef<BottomSheetModal, SkillsSheetProps>(
                 onPress={handleSubmitArgument}
                 style={styles.argSend}
               >
-                <SymbolView name="arrow.up" size={16} tintColor={catppuccin.base} />
+                <SymbolView name="arrow.up" size={16} tintColor={hex.base} />
               </AnimatedIconButton>
             </View>
           </View>
@@ -157,10 +157,10 @@ export const SkillsSheet = forwardRef<BottomSheetModal, SkillsSheetProps>(
 
 const styles = StyleSheet.create({
   background: {
-    backgroundColor: catppuccin.mantle,
+    backgroundColor: hex.mantle,
   },
   handle: {
-    backgroundColor: catppuccin.surface2,
+    backgroundColor: hex.surface2,
   },
   header: {
     paddingHorizontal: 20,
@@ -169,11 +169,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: catppuccin.text,
+    color: hex.text,
   },
   subtitle: {
     fontSize: 13,
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     marginTop: 2,
   },
   list: {
@@ -183,12 +183,11 @@ const styles = StyleSheet.create({
   item: {
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 10,
-    borderCurve: 'continuous',
+    borderRadius: 0,
     marginBottom: 2,
   },
   itemPressed: {
-    backgroundColor: catppuccin.surface0,
+    backgroundColor: hex.surface0,
   },
   itemHeader: {
     flexDirection: 'row',
@@ -203,23 +202,23 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 16,
     fontWeight: '600',
-    color: catppuccin.lavender,
-    fontFamily: 'Menlo',
+    color: hex.accent,
+    fontFamily: 'JetBrainsMono_400Regular',
     flexShrink: 1,
   },
   itemArg: {
     fontSize: 12,
-    color: catppuccin.yellow,
-    fontFamily: 'Menlo',
+    color: hex.yellow,
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   itemSource: {
     fontSize: 11,
-    color: catppuccin.overlay0,
+    color: hex.overlay0,
     textTransform: 'uppercase',
   },
   itemDesc: {
     fontSize: 14,
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
     marginTop: 3,
     lineHeight: 19,
   },
@@ -239,7 +238,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderCurve: 'continuous',
-    backgroundColor: catppuccin.surface0,
+    backgroundColor: hex.surface0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -249,12 +248,12 @@ const styles = StyleSheet.create({
   argTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: catppuccin.lavender,
-    fontFamily: 'Menlo',
+    color: hex.accent,
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   argDesc: {
     fontSize: 13,
-    color: catppuccin.subtext0,
+    color: hex.subtext0,
     marginTop: 2,
   },
   argInputRow: {
@@ -264,21 +263,20 @@ const styles = StyleSheet.create({
   },
   argInput: {
     flex: 1,
-    backgroundColor: catppuccin.surface0,
-    color: catppuccin.text,
-    borderRadius: 12,
-    borderCurve: 'continuous',
+    backgroundColor: hex.surface0,
+    color: hex.text,
+    borderRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    fontFamily: 'Menlo',
+    fontFamily: 'JetBrainsMono_400Regular',
   },
   argSend: {
     width: 36,
     height: 36,
     borderRadius: 18,
     borderCurve: 'continuous',
-    backgroundColor: catppuccin.lavender,
+    backgroundColor: hex.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },

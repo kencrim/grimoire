@@ -15,7 +15,7 @@ import (
 )
 
 // TailscaleNode wraps a tsnet.Server to give the daemon its own identity
-// on the user's Tailnet (e.g., grimoire.tailnet-name.ts.net).
+// on the user's Tailnet (e.g., hex.tailnet-name.ts.net).
 type TailscaleNode struct {
 	server    *tsnet.Server
 	port      int
@@ -97,7 +97,7 @@ func (t *TailscaleNode) Listen() (net.Listener, error) {
 	return ln, nil
 }
 
-// FQDN returns the Tailscale DNS name (e.g., grimoire.tailnet-name.ts.net).
+// FQDN returns the Tailscale DNS name (e.g., hex.tailnet-name.ts.net).
 // Only valid after a successful Up() call.
 func (t *TailscaleNode) FQDN() string {
 	return t.fqdn

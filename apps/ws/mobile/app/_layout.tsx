@@ -5,10 +5,20 @@ import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
-import { RelayClient, parseGrimoireUri, checkDaemonHealth } from '../lib/relay-client';
+import { useFonts } from 'expo-font';
+import {
+  SpaceGrotesk_400Regular,
+  SpaceGrotesk_600SemiBold,
+  SpaceGrotesk_700Bold,
+} from '@expo-google-fonts/space-grotesk';
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_500Medium,
+} from '@expo-google-fonts/jetbrains-mono';
+import { RelayClient, parseHexUri, checkDaemonHealth } from '../lib/relay-client';
 import type { AgentStatus, ConnectionConfig, StreamEvent } from '../lib/types';
 import { mergeAgentList } from '../lib/agents';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 // import {
 //   requestNotificationPermissions,
 //   notifyAgentEvent,
@@ -45,9 +55,16 @@ export function useRelay() {
   return useContext(RelayContext);
 }
 
-const STORE_KEY = 'grimoire_connection';
+const STORE_KEY = 'hex_connection';
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    SpaceGrotesk_400Regular,
+    SpaceGrotesk_600SemiBold,
+    SpaceGrotesk_700Bold,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_500Medium,
+  });
   const [client, setClient] = useState<RelayClient | null>(null);
   const [connected, setConnected] = useState(false);
   const [agents, setAgents] = useState<AgentStatus[]>([]);
@@ -145,7 +162,7 @@ export default function RootLayout() {
   }, []);
 
   const connectFromUri = useCallback(async (uri: string): Promise<boolean> => {
-    const parsed = parseGrimoireUri(uri);
+    const parsed = parseHexUri(uri);
     if (!parsed) return false;
     return connectToConfig(parsed);
   }, [connectToConfig]);
@@ -172,6 +189,8 @@ export default function RootLayout() {
     SecureStore.deleteItemAsync(STORE_KEY);
   }, []);
 
+  if (!fontsLoaded) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
@@ -192,10 +211,10 @@ export default function RootLayout() {
           <Stack
             initialRouteName="connect"
             screenOptions={{
-              headerStyle: { backgroundColor: catppuccin.mantle },
-              headerTintColor: catppuccin.text,
-              headerTitleStyle: { fontWeight: '600' },
-              contentStyle: { backgroundColor: catppuccin.base },
+              headerStyle: { backgroundColor: hex.mantle },
+              headerTintColor: hex.text,
+              headerTitleStyle: { fontFamily: 'SpaceGrotesk_600SemiBold' },
+              contentStyle: { backgroundColor: hex.base },
             }}
           >
             <Stack.Screen name="connect" options={{ title: 'Connect', headerShown: false }} />

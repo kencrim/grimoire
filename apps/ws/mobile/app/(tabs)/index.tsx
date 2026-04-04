@@ -3,7 +3,7 @@ import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useRelay } from '../_layout';
-import { catppuccin } from '../../lib/theme';
+import { hex } from '../../lib/theme';
 import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { StreamTreeItem } from '../../components/StreamTree';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
@@ -37,13 +37,13 @@ export default function StreamsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={catppuccin.lavender}
+            tintColor={hex.accent}
           />
         }
         contentContainerStyle={styles.listContent}
       />
       <AnimatedIconButton style={styles.fab} onPress={() => router.push('/create')}>
-        <SymbolView name="plus" size={24} tintColor={catppuccin.base} />
+        <SymbolView name="plus" size={24} tintColor={hex.base} />
       </AnimatedIconButton>
     </View>
   );
@@ -92,7 +92,7 @@ function flattenTree(agents: AgentStatus[]): StreamNode[] {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
   },
   listContent: {
     padding: 16,
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     borderCurve: 'continuous',
-    backgroundColor: catppuccin.lavender,
+    backgroundColor: hex.accent,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
