@@ -202,6 +202,14 @@ export default function RootLayout() {
             headerBackTitle: 'Back',
           }}
         />
+        <Stack.Screen
+          name="create"
+          options={{
+            title: 'New Workstream',
+            presentation: 'modal',
+            headerBackTitle: 'Cancel',
+          }}
+        />
       </Stack>
     </RelayContext.Provider>
   );

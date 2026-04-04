@@ -32,6 +32,12 @@
         {
           "cameraPermission": "Grimoire needs camera access to scan QR codes for daemon pairing."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Grimoire needs photo access to send images to agents."
+        }
       ]
     ]
   }

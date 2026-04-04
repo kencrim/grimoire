@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -146,18 +149,28 @@ var daemonStartCmd = &cobra.Command{
 			}
 		}
 
-		// Wire up spawn handler — when an agent calls relay_spawn,
-		// the daemon creates a child workstream
+		// Wire up spawn handler — creates workstreams from agents or mobile app
 		daemon.SetSpawnHandler(func(req relay.SpawnRequest) (relay.SpawnResponse, error) {
-			childName := req.ParentID + "/" + req.Name
-			log.Printf("[daemon] spawn requested: %s (parent: %s)", childName, req.ParentID)
+			var wsName string
+			if req.ParentID != "" {
+				wsName = req.ParentID + "/" + req.Name
+			} else {
+				wsName = req.Name
+			}
 
-			if err := createWorkstream(childName, "claude", req.Task, "", socketPath); err != nil {
+			agent := req.Agent
+			if agent == "" {
+				agent = "claude"
+			}
+
+			log.Printf("[daemon] spawn requested: %s (parent: %q, repo: %q, agent: %s)", wsName, req.ParentID, req.Repo, agent)
+
+			if err := createWorkstream(wsName, agent, req.Task, "", req.Repo, socketPath); err != nil {
 				return relay.SpawnResponse{}, err
 			}
 
 			return relay.SpawnResponse{
-				AgentID: childName,
+				AgentID: wsName,
 				Status:  "spawned",
 			}, nil
 		})
@@ -210,6 +223,74 @@ var daemonStartCmd = &cobra.Command{
 		var monitor *relay.StatusMonitor
 		if wsPort > 0 {
 			wsSrv = relay.NewWSServer(daemon, core.DefaultStatePath())
+
+			// Serve repo registry for mobile create form
+			wsSrv.HandleFunc("/api/repos", func(w http.ResponseWriter, r *http.Request) {
+				registry, err := core.LoadRepoRegistry(core.DefaultReposPath())
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				type repoEntry struct {
+					Name string `json:"name"`
+					Path string `json:"path"`
+				}
+				var repos []repoEntry
+				for _, repo := range registry.Repos {
+					repos = append(repos, repoEntry{Name: repo.Name, Path: repo.Path})
+				}
+				if repos == nil {
+					repos = []repoEntry{}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(repos)
+			})
+
+			// Accept image uploads from mobile — saves to /tmp, returns file path
+			wsSrv.HandleFunc("/api/upload", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					http.Error(w, "POST only", http.StatusMethodNotAllowed)
+					return
+				}
+
+				// 10 MB max
+				r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+				if err := r.ParseMultipartForm(10 << 20); err != nil {
+					http.Error(w, "file too large or invalid form", http.StatusBadRequest)
+					return
+				}
+
+				file, header, err := r.FormFile("image")
+				if err != nil {
+					http.Error(w, "missing 'image' field", http.StatusBadRequest)
+					return
+				}
+				defer file.Close()
+
+				// Determine extension from original filename
+				ext := filepath.Ext(header.Filename)
+				if ext == "" {
+					ext = ".png"
+				}
+
+				tmp, err := os.CreateTemp("", "grimoire-img-*"+ext)
+				if err != nil {
+					http.Error(w, "create temp file: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				defer tmp.Close()
+
+				if _, err := io.Copy(tmp, file); err != nil {
+					http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				log.Printf("[daemon] image uploaded: %s (%s)", tmp.Name(), header.Filename)
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"path": tmp.Name()})
+			})
+
 			daemon.SetEventHandler(func(event relay.StreamEvent) {
 				wsSrv.NotifyStreams(event)
 				// Send push notification for idle transitions

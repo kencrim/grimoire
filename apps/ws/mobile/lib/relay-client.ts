@@ -213,6 +213,54 @@ export class RelayClient {
     });
   }
 
+  async spawnAgent(opts: {
+    name: string;
+    repo?: string;
+    agent?: string;
+    task?: string;
+    parentId?: string;
+  }): Promise<{ agent_id: string; status: string }> {
+    const resp = await this.relay({
+      action: 'spawn',
+      payload: {
+        name: opts.name,
+        repo: opts.repo ?? '',
+        agent: opts.agent ?? 'claude',
+        task: opts.task ?? '',
+        parent_id: opts.parentId ?? '',
+      },
+    });
+    return resp as unknown as { agent_id: string; status: string };
+  }
+
+  async fetchRepos(): Promise<{ name: string; path: string }[]> {
+    const resp = await fetch(
+      `http://${this.config.host}:${this.config.port}/api/repos?${this.authParam}`,
+    );
+    return resp.json();
+  }
+
+  async uploadImage(uri: string, filename: string): Promise<string> {
+    const formData = new FormData();
+    formData.append('image', {
+      uri,
+      name: filename,
+      type: 'image/png',
+    } as unknown as Blob);
+
+    const resp = await fetch(
+      `http://${this.config.host}:${this.config.port}/api/upload?${this.authParam}`,
+      { method: 'POST', body: formData },
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Upload failed: ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    return data.path;
+  }
+
   // --- Lifecycle ---
 
   private scheduleReconnect(fn: () => void): void {

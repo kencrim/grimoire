@@ -1,4 +1,4 @@
-import { Pressable, View, Text, StyleSheet } from 'react-native';
+import { Pressable, View, Text, StyleSheet, ActionSheetIOS, Alert, Platform } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { catppuccin } from '../lib/theme';
@@ -6,6 +6,7 @@ import type { StreamNode } from '../lib/types';
 
 interface StreamTreeItemProps {
   node: StreamNode;
+  onKill?: (id: string) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -23,7 +24,45 @@ const AGENT_LABELS: Record<string, string> = {
   codex: 'codex',
 };
 
-export function StreamTreeItem({ node }: StreamTreeItemProps) {
+function confirmKill(name: string, onConfirm: () => void) {
+  Alert.alert(
+    'Kill workstream?',
+    `This will destroy the worktree and tmux session for "${name}" and all its children.`,
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Kill', style: 'destructive', onPress: onConfirm },
+    ],
+  );
+}
+
+export function showWorkstreamActions(
+  node: StreamNode,
+  onKill: () => void,
+) {
+  const actions = ['Kill Workstream', 'Cancel'];
+  const destructiveIndex = 0;
+  const cancelIndex = actions.length - 1;
+
+  if (Platform.OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: actions,
+        destructiveButtonIndex: destructiveIndex,
+        cancelButtonIndex: cancelIndex,
+        title: node.name,
+      },
+      (index) => {
+        if (index === destructiveIndex) {
+          confirmKill(node.name, onKill);
+        }
+      },
+    );
+  } else {
+    confirmKill(node.name, onKill);
+  }
+}
+
+export function StreamTreeItem({ node, onKill }: StreamTreeItemProps) {
   const statusColor = node.color ?? STATUS_COLORS[node.status] ?? catppuccin.overlay0;
 
   const handlePress = () => {
@@ -32,8 +71,9 @@ export function StreamTreeItem({ node }: StreamTreeItemProps) {
   };
 
   const handleLongPress = () => {
+    if (!onKill) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // TODO: show action sheet (kill, send message)
+    showWorkstreamActions(node, () => onKill(node.id));
   };
 
   return (

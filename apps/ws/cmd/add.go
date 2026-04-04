@@ -67,11 +67,11 @@ the parent's branch). They inherit the parent's visual theme.`,
 			return createRemoteWorkstream(name, addAgent, addTask, addOn, socketPath)
 		}
 
-		return createWorkstream(name, addAgent, addTask, addBranch, socketPath)
+		return createWorkstream(name, addAgent, addTask, addBranch, addRepo, socketPath)
 	},
 }
 
-func createWorkstream(name, agent, task, branchOverride, socketPath string) error {
+func createWorkstream(name, agent, task, branchOverride, repo, socketPath string) error {
 	tree, err := core.LoadTree(core.DefaultStatePath())
 	if err != nil {
 		return err
@@ -118,7 +118,7 @@ func createWorkstream(name, agent, task, branchOverride, socketPath string) erro
 	}
 
 	// Determine repo dir: smart resolution that works from anywhere.
-	repoDir, err := resolveRepoDir(parentNode, addRepo)
+	repoDir, err := resolveRepoDir(parentNode, repo)
 	if err != nil {
 		return err
 	}

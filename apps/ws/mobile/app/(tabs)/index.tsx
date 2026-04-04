@@ -1,5 +1,7 @@
-import { View, StyleSheet, RefreshControl } from 'react-native';
+import { View, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
+import { router, Stack } from 'expo-router';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
 import { StreamTreeItem } from '../../components/StreamTree';
@@ -8,7 +10,7 @@ import type { AgentStatus, StreamNode } from '../../lib/types';
 import { useCallback, useMemo, useState } from 'react';
 
 export default function StreamsScreen() {
-  const { agents, connected, config, refreshAgents } = useRelay();
+  const { agents, connected, config, refreshAgents, client } = useRelay();
   const [refreshing, setRefreshing] = useState(false);
 
   // Build tree from flat agent list
@@ -22,10 +24,21 @@ export default function StreamsScreen() {
 
   return (
     <View style={styles.container}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={() => router.push('/create')} hitSlop={8}>
+              <FontAwesome name="plus" size={20} color={catppuccin.lavender} />
+            </Pressable>
+          ),
+        }}
+      />
       <ConnectionBanner connected={connected} host={config?.host} port={config?.port} />
       <FlashList
         data={flatNodes}
-        renderItem={({ item }) => <StreamTreeItem node={item} />}
+        renderItem={({ item }) => (
+          <StreamTreeItem node={item} onKill={(id) => client?.killAgent(id)} />
+        )}
         estimatedItemSize={56}
         keyExtractor={(item) => item.id}
         refreshControl={

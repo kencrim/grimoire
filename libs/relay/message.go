@@ -23,12 +23,15 @@ type Message struct {
 	Time    time.Time   `json:"time"`
 }
 
-// SpawnRequest asks the daemon to create a child agent.
+// SpawnRequest asks the daemon to create an agent.
+// ParentID is optional — omit it for root workstreams.
 type SpawnRequest struct {
-	ParentID string `json:"parent_id"`
+	ParentID string `json:"parent_id,omitempty"`
 	Name     string `json:"name"`
 	Task     string `json:"task"`
 	Context  string `json:"context,omitempty"`
+	Repo     string `json:"repo,omitempty"`  // repo registry name (for root workstreams)
+	Agent    string `json:"agent,omitempty"` // claude, amp, codex (default: claude)
 }
 
 // SpawnResponse is returned after spawning a child.

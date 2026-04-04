@@ -71,6 +71,12 @@ func (ws *WSServer) Token() string {
 	return ws.token
 }
 
+// HandleFunc registers an additional HTTP handler on the server's mux.
+// The handler is wrapped with auth middleware.
+func (ws *WSServer) HandleFunc(pattern string, handler http.HandlerFunc) {
+	ws.mux.HandleFunc(pattern, ws.requireAuth(handler))
+}
+
 // Serve starts serving on an existing net.Listener. The listener can come from
 // net.Listen, tsnet.Server.Listen, or any other source. This allows the same
 // HTTP mux to serve on multiple interfaces (e.g., LAN + Tailscale).
