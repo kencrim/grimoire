@@ -25,7 +25,7 @@ export interface PaneFrame {
 }
 
 export interface PaneInputMsg {
-  type: 'input' | 'special' | 'resize';
+  type: 'input' | 'input_submit' | 'special' | 'resize';
   data: string;
   cols?: number;
   rows?: number;

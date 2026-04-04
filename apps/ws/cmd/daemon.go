@@ -246,49 +246,74 @@ var daemonStartCmd = &cobra.Command{
 				json.NewEncoder(w).Encode(repos)
 			})
 
-			// Accept image uploads from mobile — saves to /tmp, returns file path
+			// Accept image uploads from mobile — batch endpoint, saves to ~/.config/ws/uploads/
 			wsSrv.HandleFunc("/api/upload", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost {
 					http.Error(w, "POST only", http.StatusMethodNotAllowed)
 					return
 				}
 
-				// 10 MB max
-				r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-				if err := r.ParseMultipartForm(10 << 20); err != nil {
+				// 50 MB max total for batch uploads
+				r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+				if err := r.ParseMultipartForm(50 << 20); err != nil {
 					http.Error(w, "file too large or invalid form", http.StatusBadRequest)
 					return
 				}
 
-				file, header, err := r.FormFile("image")
-				if err != nil {
-					http.Error(w, "missing 'image' field", http.StatusBadRequest)
-					return
-				}
-				defer file.Close()
-
-				// Determine extension from original filename
-				ext := filepath.Ext(header.Filename)
-				if ext == "" {
-					ext = ".png"
-				}
-
-				tmp, err := os.CreateTemp("", "grimoire-img-*"+ext)
-				if err != nil {
-					http.Error(w, "create temp file: "+err.Error(), http.StatusInternalServerError)
-					return
-				}
-				defer tmp.Close()
-
-				if _, err := io.Copy(tmp, file); err != nil {
-					http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+				// Persistent upload directory
+				home, _ := os.UserHomeDir()
+				uploadDir := filepath.Join(home, ".config", "ws", "uploads")
+				if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+					http.Error(w, "create upload dir: "+err.Error(), http.StatusInternalServerError)
 					return
 				}
 
-				log.Printf("[daemon] image uploaded: %s (%s)", tmp.Name(), header.Filename)
+				// Accept multiple files under "images" field, fall back to single "image" for compat
+				files := r.MultipartForm.File["images"]
+				if len(files) == 0 {
+					files = r.MultipartForm.File["image"]
+				}
+				if len(files) == 0 {
+					http.Error(w, "missing 'images' field", http.StatusBadRequest)
+					return
+				}
 
+				var paths []string
+				for _, header := range files {
+					file, err := header.Open()
+					if err != nil {
+						http.Error(w, "open file: "+err.Error(), http.StatusBadRequest)
+						return
+					}
+
+					ext := filepath.Ext(header.Filename)
+					if ext == "" {
+						ext = ".png"
+					}
+
+					dest, err := os.CreateTemp(uploadDir, "img-*"+ext)
+					if err != nil {
+						file.Close()
+						http.Error(w, "create file: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+
+					if _, err := io.Copy(dest, file); err != nil {
+						file.Close()
+						dest.Close()
+						http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+					file.Close()
+					dest.Close()
+
+					log.Printf("[daemon] image uploaded: %s (%s)", dest.Name(), header.Filename)
+					paths = append(paths, dest.Name())
+				}
+
+				log.Printf("[daemon] upload complete: %d file(s) → %v", len(paths), paths)
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{"path": tmp.Name()})
+				json.NewEncoder(w).Encode(map[string]interface{}{"paths": paths})
 			})
 
 			daemon.SetEventHandler(func(event relay.StreamEvent) {

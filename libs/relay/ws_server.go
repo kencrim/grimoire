@@ -42,7 +42,7 @@ type StreamEvent struct {
 
 // PaneInputMsg is sent from the phone to write to a tmux pane.
 type PaneInputMsg struct {
-	Type string `json:"type"` // input, resize, special
+	Type string `json:"type"` // input, input_submit, resize, special
 	Data string `json:"data"` // text content or key name
 	Cols int    `json:"cols,omitempty"`
 	Rows int    `json:"rows,omitempty"`

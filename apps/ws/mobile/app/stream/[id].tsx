@@ -26,7 +26,8 @@ type PaneTab = 'agent' | 'terminal';
 
 interface PendingImage {
   uri: string;
-  filename: string;
+  fileName: string;
+  mimeType?: string;
 }
 
 export default function StreamScreen() {
@@ -95,7 +96,8 @@ export default function StreamScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newImages = result.assets.map((asset) => ({
       uri: asset.uri,
-      filename: asset.fileName ?? `image-${Date.now()}.png`,
+      fileName: asset.fileName ?? `image-${Date.now()}.png`,
+      mimeType: asset.mimeType,
     }));
     setPendingImages((prev) => [...prev, ...newImages]);
   }, []);
@@ -104,9 +106,6 @@ export default function StreamScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
-
-  // Small delay to let tmux process each line
-  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Send text + any pending images
   const handleSend = useCallback(async () => {
@@ -122,27 +121,25 @@ export default function StreamScreen() {
     setPendingImages([]);
     Keyboard.dismiss();
 
-    // Upload all images in parallel, then send paths + text
     if (images.length > 0) {
       setUploading(true);
       try {
-        const paths = await Promise.all(
-          images.map((img) => client.uploadImage(img.uri, img.filename)),
-        );
-        // All paths + text on one line, space-separated
-        const combined = [...paths, ...(text ? [text] : [])].join(' ');
-        client.sendPaneInput({ type: 'input', data: combined });
-        await delay(50);
-        client.sendPaneInput({ type: 'special', data: 'Enter' });
+        // Single batch request — no concurrent upload issues
+        const paths = await client.uploadImages(images);
+        // Send each path as its own submitted line so the agent sees each image,
+        // then send the text message last
+        for (const p of paths) {
+          client.sendPaneInput({ type: 'input_submit', data: p });
+        }
+        if (text) {
+          client.sendPaneInput({ type: 'input_submit', data: text });
+        }
       } catch (err) {
         Alert.alert('Upload failed', String(err));
       }
       setUploading(false);
     } else if (text) {
-      // Text only — no images
-      client.sendPaneInput({ type: 'input', data: text });
-      await delay(50);
-      client.sendPaneInput({ type: 'special', data: 'Enter' });
+      client.sendPaneInput({ type: 'input_submit', data: text });
     }
   }, [inputText, pendingImages, client]);
 

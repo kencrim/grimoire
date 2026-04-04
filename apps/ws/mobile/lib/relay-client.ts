@@ -7,6 +7,22 @@ import type {
   StreamEvent,
 } from './types';
 
+const MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.bmp': 'image/bmp',
+};
+
+function mimeFromFilename(filename: string): string {
+  const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+  return MIME_MAP[ext] ?? 'image/png';
+}
+
 type StreamsCallback = (event: StreamEvent) => void;
 type PaneCallback = (frame: PaneFrame) => void;
 type StatusCallback = (connected: boolean) => void;
@@ -240,13 +256,19 @@ export class RelayClient {
     return resp.json();
   }
 
-  async uploadImage(uri: string, filename: string): Promise<string> {
+  async uploadImages(
+    assets: { uri: string; fileName: string; mimeType?: string }[],
+  ): Promise<string[]> {
     const formData = new FormData();
-    formData.append('image', {
-      uri,
-      name: filename,
-      type: 'image/png',
-    } as unknown as Blob);
+
+    for (const asset of assets) {
+      const mimeType = asset.mimeType ?? mimeFromFilename(asset.fileName);
+      formData.append('images', {
+        uri: asset.uri,
+        name: asset.fileName,
+        type: mimeType,
+      });
+    }
 
     const resp = await fetch(
       `http://${this.config.host}:${this.config.port}/api/upload?${this.authParam}`,
@@ -257,8 +279,8 @@ export class RelayClient {
       throw new Error(`Upload failed: ${resp.status}`);
     }
 
-    const data = await resp.json();
-    return data.path;
+    const data: { paths: string[] } = await resp.json();
+    return data.paths;
   }
 
   // --- Lifecycle ---
