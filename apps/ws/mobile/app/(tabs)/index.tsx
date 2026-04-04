@@ -1,6 +1,6 @@
 import { View, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import { router, Stack } from 'expo-router';
+import { router } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
@@ -24,15 +24,6 @@ export default function StreamsScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable onPress={() => router.push('/create')} hitSlop={8}>
-              <FontAwesome name="plus" size={20} color={catppuccin.lavender} />
-            </Pressable>
-          ),
-        }}
-      />
       <ConnectionBanner connected={connected} host={config?.host} port={config?.port} />
       <FlashList
         data={flatNodes}
@@ -50,6 +41,9 @@ export default function StreamsScreen() {
         }
         contentContainerStyle={styles.listContent}
       />
+      <Pressable style={styles.fab} onPress={() => router.push('/create')}>
+        <FontAwesome name="plus" size={24} color={catppuccin.base} />
+      </Pressable>
     </View>
   );
 }
@@ -101,5 +95,21 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: catppuccin.lavender,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
   },
 });

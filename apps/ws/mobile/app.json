@@ -7,14 +7,15 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "grimoire",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.grimoire.mobile",
       "infoPlist": {
         "NSCameraUsageDescription": "Grimoire needs camera access to scan QR codes for daemon pairing.",
         "NSLocalNetworkUsageDescription": "Grimoire uses local network to discover relay daemons.",
-        "NSBonjourServices": ["_grimoire._tcp."]
+        "NSBonjourServices": ["_grimoire._tcp."],
+        "NSMicrophoneUsageDescription": "Grimoire uses the microphone for voice-to-text input.",
+        "NSSpeechRecognitionUsageDescription": "Grimoire uses speech recognition to transcribe voice input."
       }
     },
     "android": {
@@ -37,6 +38,13 @@
         "expo-image-picker",
         {
           "photosPermission": "Grimoire needs photo access to send images to agents."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Grimoire uses the microphone for voice-to-text input.",
+          "speechRecognitionPermission": "Grimoire uses speech recognition to transcribe voice input."
         }
       ]
     ]

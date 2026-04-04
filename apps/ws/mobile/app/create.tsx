@@ -82,18 +82,15 @@ export default function CreateScreen() {
           title: 'New Workstream',
           presentation: 'modal',
           headerRight: () => (
-            <Pressable onPress={handleCreate} disabled={!canCreate}>
+            <Pressable
+              onPress={handleCreate}
+              disabled={!canCreate}
+              style={[styles.createPressable, !canCreate && styles.createButtonDisabled]}
+            >
               {loading ? (
                 <ActivityIndicator size="small" color={catppuccin.lavender} />
               ) : (
-                <Text
-                  style={[
-                    styles.createButton,
-                    !canCreate && styles.createButtonDisabled,
-                  ]}
-                >
-                  Create
-                </Text>
+                <Text style={styles.createButton}>Create</Text>
               )}
             </Pressable>
           ),
@@ -256,6 +253,10 @@ const styles = StyleSheet.create({
   repoLoader: {
     alignSelf: 'flex-start',
     marginVertical: 8,
+  },
+  createPressable: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   createButton: {
     fontSize: 16,

@@ -2,16 +2,18 @@ import { useEffect, useRef, useState, createContext, useContext, useCallback } f
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
 import { RelayClient, parseGrimoireUri, checkDaemonHealth } from '../lib/relay-client';
 import type { AgentStatus, ConnectionConfig, StreamEvent } from '../lib/types';
 import { catppuccin } from '../lib/theme';
-import {
-  requestNotificationPermissions,
-  notifyAgentEvent,
-  addNotificationResponseListener,
-  registerPushToken,
-} from '../lib/notifications';
+// import {
+//   requestNotificationPermissions,
+//   notifyAgentEvent,
+//   addNotificationResponseListener,
+//   registerPushToken,
+// } from '../lib/notifications';
 import { getSavedTailscaleConfig } from '../lib/discovery';
 
 interface RelayContextValue {
@@ -76,15 +78,15 @@ export default function RootLayout() {
         setReady(true);
       });
 
-    requestNotificationPermissions();
+    // requestNotificationPermissions();
 
-    // Navigate to the agent's stream when user taps a notification
-    const sub = addNotificationResponseListener((agentId) => {
-      router.push(`/stream/${agentId}`);
-    });
+    // // Navigate to the agent's stream when user taps a notification
+    // const sub = addNotificationResponseListener((agentId) => {
+    //   router.push(`/stream/${agentId}`);
+    // });
 
     return () => {
-      sub.remove();
+      // sub.remove();
       clientRef.current?.dispose();
     };
   }, []);
@@ -116,10 +118,10 @@ export default function RootLayout() {
         setAgents((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
       }
 
-      // Fire local notification when app is backgrounded
-      if (event.type !== 'snapshot') {
-        notifyAgentEvent(event);
-      }
+      // // Fire local notification when app is backgrounded
+      // if (event.type !== 'snapshot') {
+      //   notifyAgentEvent(event);
+      // }
     });
 
     newClient.connectStreams();
@@ -135,8 +137,8 @@ export default function RootLayout() {
       // Keychain write rejected (e.g. device locked during background restore)
     }
 
-    // Register push token so daemon can send remote notifications
-    registerPushToken(cfg).catch(() => {});
+    // // Register push token so daemon can send remote notifications
+    // registerPushToken(cfg).catch(() => {});
 
     return true;
   }, []);
@@ -170,47 +172,51 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <RelayContext.Provider
-      value={{
-        client,
-        connected,
-        agents,
-        connect: connectToConfig,
-        connectFromUri,
-        disconnect,
-        refreshAgents,
-        config,
-        ready,
-      }}
-    >
-      <StatusBar style="light" />
-      <Stack
-        initialRouteName="connect"
-        screenOptions={{
-          headerStyle: { backgroundColor: catppuccin.mantle },
-          headerTintColor: catppuccin.text,
-          headerTitleStyle: { fontWeight: '600' },
-          contentStyle: { backgroundColor: catppuccin.base },
-        }}
-      >
-        <Stack.Screen name="connect" options={{ title: 'Connect', headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="stream/[id]"
-          options={{
-            title: 'Terminal',
-            headerBackTitle: 'Back',
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <BottomSheetModalProvider>
+        <RelayContext.Provider
+          value={{
+            client,
+            connected,
+            agents,
+            connect: connectToConfig,
+            connectFromUri,
+            disconnect,
+            refreshAgents,
+            config,
+            ready,
           }}
-        />
-        <Stack.Screen
-          name="create"
-          options={{
-            title: 'New Workstream',
-            presentation: 'modal',
-            headerBackTitle: 'Cancel',
-          }}
-        />
-      </Stack>
-    </RelayContext.Provider>
+        >
+          <StatusBar style="light" />
+          <Stack
+            initialRouteName="connect"
+            screenOptions={{
+              headerStyle: { backgroundColor: catppuccin.mantle },
+              headerTintColor: catppuccin.text,
+              headerTitleStyle: { fontWeight: '600' },
+              contentStyle: { backgroundColor: catppuccin.base },
+            }}
+          >
+            <Stack.Screen name="connect" options={{ title: 'Connect', headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="stream/[id]"
+              options={{
+                title: 'Terminal',
+                headerBackTitle: 'Back',
+              }}
+            />
+            <Stack.Screen
+              name="create"
+              options={{
+                title: 'New Workstream',
+                presentation: 'modal',
+                headerBackTitle: 'Cancel',
+              }}
+            />
+          </Stack>
+        </RelayContext.Provider>
+      </BottomSheetModalProvider>
+    </GestureHandlerRootView>
   );
 }

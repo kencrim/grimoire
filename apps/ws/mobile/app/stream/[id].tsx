@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,8 +16,11 @@ import { useLocalSearchParams, Stack, router } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
 import { useRelay } from '../_layout';
-import { showWorkstreamActions } from '../../components/StreamTree';
 import { NativeTerminalView } from '../../components/NativeTerminalView';
 import type { PaneFrame } from '../../lib/types';
 import { catppuccin } from '../../lib/theme';
@@ -38,30 +41,65 @@ export default function StreamScreen() {
   const [latestFrame, setLatestFrame] = useState<PaneFrame | null>(null);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
+
+  // Speech recognition — streams transcription into the input field
+  useSpeechRecognitionEvent('start', () => setRecognizing(true));
+  useSpeechRecognitionEvent('end', () => setRecognizing(false));
+  useSpeechRecognitionEvent('result', (event) => {
+    const transcript = event.results[0]?.transcript ?? '';
+    if (transcript) {
+      setInputText(transcript);
+    }
+  });
+
+  // Request mic permissions once on mount
+  const micPermitted = useRef(false);
+  useEffect(() => {
+    ExpoSpeechRecognitionModule.requestPermissionsAsync().then((result) => {
+      micPermitted.current = result.granted;
+    });
+  }, []);
+
+  const handleMic = useCallback(() => {
+    if (recognizing) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    if (!micPermitted.current) {
+      Alert.alert('Permission required', 'Microphone and speech recognition access is needed.');
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    ExpoSpeechRecognitionModule.start({
+      lang: 'en-US',
+      interimResults: true,
+      continuous: true,
+      addsPunctuation: true,
+    });
+  }, [recognizing]);
 
   // Find the agent to get pane info
   const agent = agents.find((a) => a.id === id);
   const displayName = id?.includes('/') ? id.split('/').pop() : id;
 
-  // Build a StreamNode for the action sheet helper
-  const streamNode = useMemo(() => ({
-    id: id ?? '',
-    name: displayName ?? '',
-    agent: agent?.agent ?? '',
-    status: agent?.status ?? '',
-    color: agent?.color,
-    children: [],
-    depth: 0,
-  }), [id, displayName, agent]);
-
   const handleActions = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    showWorkstreamActions(streamNode, () => {
-      client?.killAgent(streamNode.id).then(() => {
-        router.back();
-      });
-    });
-  }, [streamNode, client]);
+    Alert.alert(
+      'Kill workstream?',
+      `This will destroy the worktree and tmux session for "${displayName}" and all its children.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Kill',
+          style: 'destructive',
+          onPress: () => {
+            client?.killAgent(id ?? '').then(() => router.back());
+          },
+        },
+      ],
+    );
+  }, [client, id, displayName]);
 
   // The agent ID is what we pass to the daemon — it resolves the pane internally
   const agentRef = id ?? '';
@@ -179,20 +217,18 @@ export default function StreamScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen
-        options={{
-          title: displayName ?? 'Terminal',
-          headerRight: () => (
-            <View style={styles.headerRight}>
-              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-              <Text style={styles.headerAgent}>{agent?.agent ?? ''}</Text>
-              <Pressable onPress={handleActions} hitSlop={8}>
-                <FontAwesome name="ellipsis-h" size={18} color={catppuccin.subtext0} />
-              </Pressable>
-            </View>
-          ),
-        }}
-      />
+      <Stack.Screen options={{ title: displayName ?? 'Terminal' }} />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu icon="ellipsis">
+          <Stack.Toolbar.MenuAction
+            icon="xmark.circle"
+            destructive
+            onPress={handleActions}
+          >
+            Kill Workstream
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
 
       {/* Terminal */}
       <View style={styles.terminal}>
@@ -244,11 +280,8 @@ export default function StreamScreen() {
           </ScrollView>
         )}
 
-        {/* Input row */}
-        <View style={styles.inputRow}>
-          <Pressable onPress={handleImagePick} hitSlop={6} style={styles.attachButton}>
-            <FontAwesome name="plus" size={18} color={catppuccin.overlay1} />
-          </Pressable>
+        {/* Input field — full width with border outline */}
+        <View style={styles.inputWrapper}>
           <TextInput
             style={styles.input}
             value={inputText}
@@ -257,26 +290,47 @@ export default function StreamScreen() {
             placeholderTextColor={catppuccin.overlay0}
             autoCapitalize="none"
             autoCorrect={false}
-            returnKeyType="send"
-            onSubmitEditing={handleSend}
+            multiline
+            returnKeyType="default"
             blurOnSubmit={false}
           />
-          <Pressable
-            style={[styles.sendButton, !hasContent && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!hasContent || uploading}
-          >
-            <FontAwesome
-              name="arrow-up"
-              size={16}
-              color={hasContent ? catppuccin.base : catppuccin.surface2}
-            />
-          </Pressable>
         </View>
 
-        {/* Safe area spacer — keeps input row centered in the footer */}
+        {/* Action buttons row */}
+        <View style={styles.actionsRow}>
+          <Pressable onPress={handleImagePick} hitSlop={8} style={styles.attachButton}>
+            <FontAwesome name="plus" size={18} color={catppuccin.overlay1} />
+          </Pressable>
+          <View style={styles.actionsRight}>
+            <Pressable
+              onPress={handleMic}
+              hitSlop={8}
+              style={[styles.micButton, recognizing && styles.micButtonActive]}
+            >
+              <FontAwesome
+                name="microphone"
+                size={18}
+                color={recognizing ? catppuccin.red : catppuccin.overlay1}
+              />
+            </Pressable>
+            <Pressable
+              style={[styles.sendButton, !hasContent && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={!hasContent || uploading}
+            >
+              <FontAwesome
+                name="arrow-up"
+                size={16}
+                color={hasContent ? catppuccin.base : catppuccin.surface2}
+              />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Safe area spacer */}
         <View style={{ height: bottomPadding }} />
       </View>
+
     </View>
   );
 }
@@ -285,20 +339,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: catppuccin.base,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  headerAgent: {
-    fontSize: 13,
-    color: catppuccin.subtext0,
   },
   terminal: {
     flex: 1,
@@ -331,13 +371,15 @@ const styles = StyleSheet.create({
     backgroundColor: catppuccin.mantle,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: catppuccin.surface0,
+    paddingHorizontal: 16,
   },
   thumbnailRow: {
     maxHeight: 72,
+    marginHorizontal: -16,
   },
   thumbnailContent: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
     gap: 8,
   },
   thumbnail: {
@@ -361,34 +403,55 @@ const styles = StyleSheet.create({
     backgroundColor: catppuccin.mantle,
     borderRadius: 9,
   },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
+  inputWrapper: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: catppuccin.surface2,
+    borderRadius: 22,
+    backgroundColor: 'transparent',
+  },
+  input: {
+    color: catppuccin.text,
+    paddingHorizontal: 18,
     paddingTop: 12,
     paddingBottom: 12,
-    gap: 10,
+    fontSize: 16,
+    lineHeight: 22,
+    maxHeight: 120,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 10,
+    paddingBottom: 8,
   },
   attachButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: catppuccin.surface0,
+    borderWidth: 1,
+    borderColor: catppuccin.surface2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
   },
-  input: {
-    flex: 1,
-    backgroundColor: catppuccin.surface0,
-    color: catppuccin.text,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    fontSize: 16,
-    lineHeight: 22,
-    maxHeight: 120,
+  actionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  micButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: catppuccin.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micButtonActive: {
+    borderColor: catppuccin.red,
+    backgroundColor: 'rgba(243, 139, 168, 0.15)',
   },
   sendButton: {
     width: 36,
@@ -397,14 +460,8 @@ const styles = StyleSheet.create({
     backgroundColor: catppuccin.lavender,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
   },
   sendButtonDisabled: {
     backgroundColor: catppuccin.surface0,
-  },
-  sendText: {
-    color: catppuccin.base,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
