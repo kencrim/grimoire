@@ -29,6 +29,7 @@ var addTask string
 var addBranch string
 var addParent string
 var addOn string
+var addRepo string
 
 var addCmd = &cobra.Command{
 	Use:   "add <name>",
@@ -116,14 +117,10 @@ func createWorkstream(name, agent, task, branchOverride, socketPath string) erro
 		branch = "ws-" + strings.ReplaceAll(name, "/", "-")
 	}
 
-	// Determine repo dir: use parent's WorkDir for children (the daemon's cwd
-	// may not be a git repo), caller's cwd for root workstreams.
-	var repoDir string
-	if parentNode != nil {
-		repoDir = parentNode.WorkDir
-	}
-	if repoDir == "" {
-		repoDir, _ = os.Getwd()
+	// Determine repo dir: smart resolution that works from anywhere.
+	repoDir, err := resolveRepoDir(parentNode, addRepo)
+	if err != nil {
+		return err
 	}
 
 	// Worktree goes alongside the repo dir (sibling directory)
@@ -277,6 +274,7 @@ func createWorkstream(name, agent, task, branchOverride, socketPath string) erro
 		Status:    core.StatusRunning,
 		Agent:     agent,
 		WorkDir:   absPath,
+		RepoDir:   repoDir,
 		Session:   sessionName,
 		Color:     theme.Border,
 		Shader:    theme.Shader,
@@ -522,11 +520,76 @@ func waitForRemotePane(host, paneID string) {
 	log.Printf("[ws add] warning: remote pane %s not ready after 15s, proceeding anyway", paneID)
 }
 
+// resolveRepoDir determines the git repository root for a new workstream.
+// Resolution order:
+//  1. --repo flag → look up in repo registry
+//  2. Parent node → inherit RepoDir (fall back to WorkDir for old nodes)
+//  3. cwd → auto-detect via git rev-parse --show-toplevel
+//  4. Single repo in registry → use it
+//  5. Multiple repos → error listing choices
+//  6. No repos → error with guidance
+func resolveRepoDir(parentNode *core.Node, repoFlag string) (string, error) {
+	// 1. Explicit --repo flag
+	if repoFlag != "" {
+		registry, err := core.LoadRepoRegistry(core.DefaultReposPath())
+		if err != nil {
+			return "", fmt.Errorf("load repo registry: %w", err)
+		}
+		repo, ok := registry.Get(repoFlag)
+		if !ok {
+			return "", fmt.Errorf("repo %q not found (see: ws repo list)", repoFlag)
+		}
+		return repo.Path, nil
+	}
+
+	// 2. Inherit from parent
+	if parentNode != nil {
+		if parentNode.RepoDir != "" {
+			return parentNode.RepoDir, nil
+		}
+		// Backward compat: old nodes don't have RepoDir
+		return parentNode.WorkDir, nil
+	}
+
+	// 3. Auto-detect from cwd
+	cwd, err := os.Getwd()
+	if err == nil {
+		gitTopLevel := exec.Command("git", "rev-parse", "--show-toplevel")
+		gitTopLevel.Dir = cwd
+		if out, err := gitTopLevel.Output(); err == nil {
+			return strings.TrimSpace(string(out)), nil
+		}
+	}
+
+	// 4-5. Fall back to repo registry
+	registry, err := core.LoadRepoRegistry(core.DefaultReposPath())
+	if err == nil {
+		if len(registry.Repos) == 1 {
+			for _, repo := range registry.Repos {
+				return repo.Path, nil
+			}
+		}
+		if len(registry.Repos) > 1 {
+			var names []string
+			for name := range registry.Repos {
+				names = append(names, name)
+			}
+			return "", fmt.Errorf("multiple repos registered; specify one with --repo:\n  %s",
+				strings.Join(names, "\n  "))
+		}
+	}
+
+	// 6. Nothing available
+	return "", fmt.Errorf("not inside a git repo and no repos registered\n" +
+		"Register one with: ws repo add <name> /path/to/repo")
+}
+
 func init() {
 	addCmd.Flags().StringVarP(&addAgent, "agent", "a", "claude", "Agent to launch (claude, amp, codex)")
 	addCmd.Flags().StringVarP(&addTask, "task", "t", "", "Task description for the agent")
 	addCmd.Flags().StringVarP(&addBranch, "branch", "b", "", "Use an existing git branch (instead of creating ws-<name>)")
 	addCmd.Flags().StringVarP(&addParent, "parent", "p", "", "Parent workstream (child branches off parent's branch)")
 	addCmd.Flags().StringVar(&addOn, "on", "", "Remote host to create workstream on (from ws remote list)")
+	addCmd.Flags().StringVar(&addRepo, "repo", "", "Repository to create workstream in (from ws repo list)")
 	rootCmd.AddCommand(addCmd)
 }

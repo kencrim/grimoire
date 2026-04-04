@@ -185,11 +185,8 @@ var daemonStartCmd = &cobra.Command{
 				}
 
 				// Remove git worktree (local only)
-				if node.Type == core.NodeTypeLocal && node.WorkDir != "" {
-					gitRemove := exec.Command("git", "worktree", "remove", node.WorkDir, "--force")
-					if out, err := gitRemove.CombinedOutput(); err != nil {
-						log.Printf("[daemon] warning: worktree remove %s: %s", node.WorkDir, string(out))
-					}
+				if err := removeWorktree(node); err != nil {
+					log.Printf("[daemon] warning: %v", err)
 				}
 
 				killedIDs = append(killedIDs, node.ID)

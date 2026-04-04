@@ -263,6 +263,52 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveLoad_RepoDir(t *testing.T) {
+	tr := freshTree(t)
+	n := makeNode("root", "")
+	n.RepoDir = "/some/repo/path"
+
+	if err := tr.Add(n); err != nil {
+		t.Fatalf("unexpected error adding node: %v", err)
+	}
+	if err := tr.Save(); err != nil {
+		t.Fatalf("unexpected error saving tree: %v", err)
+	}
+
+	loaded, err := LoadTree(tr.path)
+	if err != nil {
+		t.Fatalf("unexpected error loading tree: %v", err)
+	}
+
+	got := loaded.Nodes["root"]
+	if got.RepoDir != "/some/repo/path" {
+		t.Errorf("RepoDir = %q, want %q", got.RepoDir, "/some/repo/path")
+	}
+}
+
+func TestSaveLoad_MissingRepoDir(t *testing.T) {
+	tr := freshTree(t)
+	n := makeNode("old", "")
+	// Don't set RepoDir — simulates old state.json
+
+	if err := tr.Add(n); err != nil {
+		t.Fatalf("unexpected error adding node: %v", err)
+	}
+	if err := tr.Save(); err != nil {
+		t.Fatalf("unexpected error saving tree: %v", err)
+	}
+
+	loaded, err := LoadTree(tr.path)
+	if err != nil {
+		t.Fatalf("unexpected error loading tree: %v", err)
+	}
+
+	got := loaded.Nodes["old"]
+	if got.RepoDir != "" {
+		t.Errorf("expected empty RepoDir for old node, got %q", got.RepoDir)
+	}
+}
+
 func TestLoadTree_NonExistent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does_not_exist", "state.json")
 
