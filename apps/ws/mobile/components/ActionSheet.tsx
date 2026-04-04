@@ -88,6 +88,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 12,
+    borderCurve: 'continuous',
   },
   itemPressed: {
     backgroundColor: catppuccin.surface0,

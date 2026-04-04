@@ -7,6 +7,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
 import { RelayClient, parseGrimoireUri, checkDaemonHealth } from '../lib/relay-client';
 import type { AgentStatus, ConnectionConfig, StreamEvent } from '../lib/types';
+import { mergeAgentList } from '../lib/agents';
 import { catppuccin } from '../lib/theme';
 // import {
 //   requestNotificationPermissions,
@@ -107,7 +108,7 @@ export default function RootLayout() {
 
     newClient.onStreams((event: StreamEvent) => {
       if (event.type === 'snapshot' && Array.isArray(event.data)) {
-        setAgents(event.data);
+        setAgents(prev => mergeAgentList(prev, event.data));
       } else if (event.type === 'agent_spawned' && !Array.isArray(event.data)) {
         setAgents((prev) => [...prev, event.data as AgentStatus]);
       } else if (event.type === 'agent_killed' && !Array.isArray(event.data)) {
@@ -154,7 +155,7 @@ export default function RootLayout() {
     try {
       const fresh = await clientRef.current.getStatus();
       if (Array.isArray(fresh)) {
-        setAgents(fresh);
+        setAgents(prev => mergeAgentList(prev, fresh));
       }
     } catch {
       // ignore — WebSocket will recover on its own

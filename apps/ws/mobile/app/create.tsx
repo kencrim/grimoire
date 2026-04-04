@@ -3,18 +3,17 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useRelay } from './_layout';
 import { catppuccin } from '../lib/theme';
+import { AnimatedIconButton } from '../components/AnimatedIconButton';
 
 const AGENTS = ['claude', 'amp', 'codex'] as const;
 
@@ -53,7 +52,7 @@ export default function CreateScreen() {
     if (!client || !name.trim()) return;
 
     setLoading(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
       await client.spawnAgent({
@@ -75,24 +74,25 @@ export default function CreateScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}
     >
       <Stack.Screen
         options={{
           title: 'New Workstream',
           presentation: 'modal',
           headerRight: () => (
-            <Pressable
+            <AnimatedIconButton
               onPress={handleCreate}
               disabled={!canCreate}
               style={[styles.createPressable, !canCreate && styles.createButtonDisabled]}
+              pressScale={0.92}
             >
               {loading ? (
                 <ActivityIndicator size="small" color={catppuccin.lavender} />
               ) : (
                 <Text style={styles.createButton}>Create</Text>
               )}
-            </Pressable>
+            </AnimatedIconButton>
           ),
         }}
       />
@@ -129,13 +129,14 @@ export default function CreateScreen() {
         ) : (
           <View style={styles.chipRow}>
             {repos.map((repo) => (
-              <Pressable
+              <AnimatedIconButton
                 key={repo.name}
                 style={[
                   styles.chip,
                   selectedRepo === repo.name && styles.chipSelected,
                 ]}
                 onPress={() => setSelectedRepo(repo.name)}
+                pressScale={0.92}
               >
                 <Text
                   style={[
@@ -145,7 +146,7 @@ export default function CreateScreen() {
                 >
                   {repo.name}
                 </Text>
-              </Pressable>
+              </AnimatedIconButton>
             ))}
           </View>
         )}
@@ -154,13 +155,14 @@ export default function CreateScreen() {
         <Text style={styles.label}>Agent</Text>
         <View style={styles.chipRow}>
           {AGENTS.map((agent) => (
-            <Pressable
+            <AnimatedIconButton
               key={agent}
               style={[
                 styles.chip,
                 selectedAgent === agent && styles.chipSelected,
               ]}
               onPress={() => setSelectedAgent(agent)}
+              pressScale={0.92}
             >
               <Text
                 style={[
@@ -170,7 +172,7 @@ export default function CreateScreen() {
               >
                 {agent}
               </Text>
-            </Pressable>
+            </AnimatedIconButton>
           ))}
         </View>
 
@@ -212,6 +214,7 @@ const styles = StyleSheet.create({
     backgroundColor: catppuccin.surface0,
     color: catppuccin.text,
     borderRadius: 10,
+    borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
@@ -230,6 +233,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: catppuccin.surface2,
     borderRadius: 8,
+    borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 8,
   },

@@ -56,6 +56,19 @@ type AgentStatus struct {
 	PaneID   string `json:"pane_id,omitempty"`
 }
 
+// SkillsRequest asks for available slash commands for an agent.
+type SkillsRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
+// Skill represents a slash command available to an agent.
+type Skill struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Source       string `json:"source"`                  // plugin, project, user
+	ArgumentHint string `json:"argument_hint,omitempty"` // e.g. "<phase-number>", "[optional description]"
+}
+
 // KillRequest asks the daemon to terminate an agent and its descendants.
 type KillRequest struct {
 	AgentID string `json:"agent_id"`

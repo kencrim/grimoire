@@ -1,45 +1,31 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { parseTerminalContent, type ParsedLine } from '../lib/ansi-native';
 import type { PaneFrame } from '../lib/types';
 import { catppuccin } from '../lib/theme';
 
 const MAX_BUFFER_LINES = 5000;
 
-interface NativeTerminalViewProps {
-  frame: PaneFrame | null;
+export interface NativeTerminalHandle {
+  pushFrame: (frame: PaneFrame) => void;
+  clear: () => void;
 }
 
 /**
  * Merge a new frame into the existing line buffer based on the scroll indicator.
- *
- * The server sends two kinds of scrolled=-1 frames:
- *  1. The initial history snapshot (capture-pane -S -1000) which has rows=0
- *     because the StreamTo method doesn't set Cols/Rows.
- *  2. Subsequent "line-count mismatch" frames where the server couldn't detect
- *     scroll direction — these have rows>0 and are just the visible pane.
- *
- *  scrolled === -1, rows === 0  → initial history: replace everything
- *  scrolled === -1, rows  > 0  → visible-pane refresh: preserve history
- *  scrolled === 0               → in-place update: replace visible portion
- *  scrolled  > 0                → N new lines scrolled in: append to history
  */
 function mergeFrame(buffer: string[], frame: PaneFrame): string[] {
   const frameLines = frame.content.split('\n');
 
   if (frame.scrolled === -1) {
     if (frame.rows === 0 || buffer.length === 0) {
-      // Initial history snapshot or very first frame — replace everything
       return frameLines;
     }
-    // Visible-pane-only refresh — preserve history, replace last rows lines
     const historyEnd = Math.max(0, buffer.length - frame.rows);
     const merged = buffer.slice(0, historyEnd).concat(frameLines);
     return merged.length > MAX_BUFFER_LINES
@@ -48,7 +34,6 @@ function mergeFrame(buffer: string[], frame: PaneFrame): string[] {
   }
 
   if (frame.scrolled === 0) {
-    // Replace the last visible chunk (same size as the incoming frame)
     const historyEnd = Math.max(0, buffer.length - frameLines.length);
     const merged = buffer.slice(0, historyEnd).concat(frameLines);
     return merged.length > MAX_BUFFER_LINES
@@ -56,7 +41,6 @@ function mergeFrame(buffer: string[], frame: PaneFrame): string[] {
       : merged;
   }
 
-  // scrolled > 0: new lines appeared at the bottom
   const newLines = frameLines.slice(frameLines.length - frame.scrolled);
   const merged = buffer.concat(newLines);
   return merged.length > MAX_BUFFER_LINES
@@ -64,80 +48,118 @@ function mergeFrame(buffer: string[], frame: PaneFrame): string[] {
     : merged;
 }
 
-export function NativeTerminalView({ frame }: NativeTerminalViewProps) {
-  const scrollRef = useRef<ScrollView>(null);
-  const bufferRef = useRef<string[]>([]);
-  const userScrolledUpRef = useRef(false);
-  const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
+/**
+ * Parse only the lines that changed between prev and next buffers.
+ * Returns a new parsedLines array reusing unchanged ParsedLine references.
+ */
+function incrementalParse(
+  prevBuffer: string[],
+  nextBuffer: string[],
+  prevParsed: ParsedLine[],
+): ParsedLine[] {
+  // Find where buffers diverge from the start
+  const minLen = Math.min(prevBuffer.length, nextBuffer.length);
+  let firstDiff = 0;
+  while (firstDiff < minLen && prevBuffer[firstDiff] === nextBuffer[firstDiff]) {
+    firstDiff++;
+  }
 
-  // Process every frame into the buffer; only re-render when not scrolled up.
-  useEffect(() => {
-    if (!frame) return;
+  // If nothing changed and same length, return prev reference
+  if (firstDiff === minLen && prevBuffer.length === nextBuffer.length) {
+    return prevParsed;
+  }
 
-    bufferRef.current = mergeFrame(bufferRef.current, frame);
-
-    if (!userScrolledUpRef.current) {
-      setParsedLines(parseTerminalContent(bufferRef.current.join('\n')));
-    }
-  }, [frame]);
-
-  // When user scrolls back to bottom, render the latest buffer state.
-  const flushBuffer = useCallback(() => {
-    setParsedLines(parseTerminalContent(bufferRef.current.join('\n')));
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: false });
-    });
-  }, []);
-
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-      const distanceFromBottom =
-        contentSize.height - contentOffset.y - layoutMeasurement.height;
-      const wasScrolledUp = userScrolledUpRef.current;
-      const isScrolledUp = distanceFromBottom > 40;
-      userScrolledUpRef.current = isScrolledUp;
-
-      // User just scrolled back to bottom — flush buffered content
-      if (wasScrolledUp && !isScrolledUp) {
-        flushBuffer();
-      }
-    },
-    [flushBuffer],
-  );
-
-  const handleContentSizeChange = useCallback(
-    (_w: number, h: number) => {
-      if (!userScrolledUpRef.current) {
-        scrollRef.current?.scrollToEnd({ animated: false });
-      }
-    },
-    [],
-  );
-
-  return (
-    <View style={styles.container}>
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        onScroll={handleScroll}
-        onContentSizeChange={handleContentSizeChange}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator
-        showsHorizontalScrollIndicator={false}
-        bounces
-        indicatorStyle="white"
-      >
-        {parsedLines.map((line, i) => (
-          <TerminalLine key={i} line={line} />
-        ))}
-      </ScrollView>
-    </View>
-  );
+  // Reuse unchanged prefix, re-parse only the changed tail
+  const reused = prevParsed.slice(0, firstDiff);
+  const changedRaw = nextBuffer.slice(firstDiff).join('\n');
+  const changedParsed = parseTerminalContent(changedRaw);
+  return reused.concat(changedParsed);
 }
 
-function TerminalLine({ line }: { line: ParsedLine }) {
+export const NativeTerminalView = forwardRef<NativeTerminalHandle>(
+  function NativeTerminalView(_props, ref) {
+    const listRef = useRef<FlashList<ParsedLine>>(null);
+    const bufferRef = useRef<string[]>([]);
+    const prevBufferRef = useRef<string[]>([]);
+    const userScrolledUpRef = useRef(false);
+    const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
+
+    useImperativeHandle(ref, () => ({
+      pushFrame(frame: PaneFrame) {
+        const prev = bufferRef.current;
+        const next = mergeFrame(prev, frame);
+        bufferRef.current = next;
+        if (!userScrolledUpRef.current) {
+          const prevParsedSnapshot = prevBufferRef.current;
+          prevBufferRef.current = next;
+          setParsedLines(prevParsed =>
+            incrementalParse(prevParsedSnapshot, next, prevParsed),
+          );
+          // Auto-scroll after React processes the update
+          requestAnimationFrame(() => {
+            if (!userScrolledUpRef.current) {
+              listRef.current?.scrollToEnd({ animated: false });
+            }
+          });
+        }
+      },
+      clear() {
+        bufferRef.current = [];
+        prevBufferRef.current = [];
+        setParsedLines([]);
+      },
+    }), []);
+
+    const flushBuffer = useCallback(() => {
+      const content = bufferRef.current.join('\n');
+      const parsed = parseTerminalContent(content);
+      prevBufferRef.current = bufferRef.current;
+      setParsedLines(parsed);
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: false });
+      });
+    }, []);
+
+    const handleScroll = useCallback(
+      (event: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
+        const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+        const distanceFromBottom =
+          contentSize.height - contentOffset.y - layoutMeasurement.height;
+        const wasScrolledUp = userScrolledUpRef.current;
+        const isScrolledUp = distanceFromBottom > 40;
+        userScrolledUpRef.current = isScrolledUp;
+
+        if (wasScrolledUp && !isScrolledUp) {
+          flushBuffer();
+        }
+      },
+      [flushBuffer],
+    );
+
+    const renderItem = useCallback(
+      ({ item }: { item: ParsedLine }) => <TerminalLine line={item} />,
+      [],
+    );
+
+    return (
+      <View style={styles.container}>
+        <FlashList
+          ref={listRef}
+          data={parsedLines}
+          renderItem={renderItem}
+          estimatedItemSize={18}
+          onScroll={handleScroll}
+          scrollEventThrottle={32}
+          showsVerticalScrollIndicator
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        />
+      </View>
+    );
+  },
+);
+
+const TerminalLine = memo(function TerminalLine({ line }: { line: ParsedLine }) {
   if (line.spans.length === 0) {
     return <Text style={styles.line}>{'\n'}</Text>;
   }
@@ -150,15 +172,12 @@ function TerminalLine({ line }: { line: ParsedLine }) {
       ))}
     </Text>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: catppuccin.base,
-  },
-  scroll: {
-    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 6,

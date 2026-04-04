@@ -36,6 +36,13 @@ export interface Envelope {
   payload: Record<string, unknown>;
 }
 
+export interface Skill {
+  name: string;
+  description: string;
+  source: 'plugin' | 'project' | 'user';
+  argument_hint?: string;
+}
+
 export interface ConnectionConfig {
   host: string;
   port: number;

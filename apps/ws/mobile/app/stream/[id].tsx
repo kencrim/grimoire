@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,14 @@ import {
   Image,
   StyleSheet,
   Keyboard,
-  Platform,
   Alert,
   ScrollView,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, router } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { SymbolView } from 'expo-symbols';
+import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -21,8 +22,10 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import { useRelay } from '../_layout';
-import { NativeTerminalView } from '../../components/NativeTerminalView';
-import type { PaneFrame } from '../../lib/types';
+import { AnimatedIconButton } from '../../components/AnimatedIconButton';
+import { SkillsSheet } from '../../components/SkillsSheet';
+import { NativeTerminalView, type NativeTerminalHandle } from '../../components/NativeTerminalView';
+import type { Skill } from '../../lib/types';
 import { catppuccin } from '../../lib/theme';
 
 type PaneTab = 'agent' | 'terminal';
@@ -38,14 +41,34 @@ export default function StreamScreen() {
   const { client, agents } = useRelay();
   const [activeTab, setActiveTab] = useState<PaneTab>('agent');
   const [inputText, setInputText] = useState('');
-  const [latestFrame, setLatestFrame] = useState<PaneFrame | null>(null);
+  const terminalRef = useRef<NativeTerminalHandle>(null);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [uploading, setUploading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const skillsRef = useRef<BottomSheetModal>(null);
+
+  // Fetch available skills on mount
+  useEffect(() => {
+    if (!client || !id) return;
+    client.getSkills(id).then(setSkills).catch(() => {});
+  }, [client, id]);
+
+  const handleSkills = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    skillsRef.current?.present();
+  }, []);
+
+  const handleSkillSelect = useCallback((skill: Skill, argument?: string) => {
+    skillsRef.current?.dismiss();
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const cmd = argument ? `/${skill.name} ${argument}` : `/${skill.name}`;
+    client?.sendPaneInput({ type: 'input_submit', data: cmd });
+  }, [client]);
 
   // Speech recognition — streams transcription into the input field
-  useSpeechRecognitionEvent('start', () => setRecognizing(true));
   useSpeechRecognitionEvent('end', () => setRecognizing(false));
+  useSpeechRecognitionEvent('error', () => setRecognizing(false));
   useSpeechRecognitionEvent('result', (event) => {
     const transcript = event.results[0]?.transcript ?? '';
     if (transcript) {
@@ -63,6 +86,7 @@ export default function StreamScreen() {
 
   const handleMic = useCallback(() => {
     if (recognizing) {
+      setRecognizing(false);
       ExpoSpeechRecognitionModule.stop();
       return;
     }
@@ -70,7 +94,8 @@ export default function StreamScreen() {
       Alert.alert('Permission required', 'Microphone and speech recognition access is needed.');
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setRecognizing(true);
     ExpoSpeechRecognitionModule.start({
       lang: 'en-US',
       interimResults: true,
@@ -84,7 +109,7 @@ export default function StreamScreen() {
   const displayName = id?.includes('/') ? id.split('/').pop() : id;
 
   const handleActions = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
       'Kill workstream?',
       `This will destroy the worktree and tmux session for "${displayName}" and all its children.`,
@@ -104,15 +129,15 @@ export default function StreamScreen() {
   // The agent ID is what we pass to the daemon — it resolves the pane internally
   const agentRef = id ?? '';
 
-  // Connect pane WebSocket and receive frames
+  // Connect pane WebSocket and push frames directly to terminal (no parent re-render)
   useEffect(() => {
     if (!client || !agentRef) return;
 
-    setLatestFrame(null);
+    terminalRef.current?.clear();
     client.connectPane(agentRef, activeTab);
 
-    const unsub = client.onPane((frame: PaneFrame) => {
-      setLatestFrame(frame);
+    const unsub = client.onPane((frame) => {
+      terminalRef.current?.pushFrame(frame);
     });
 
     return () => {
@@ -131,7 +156,7 @@ export default function StreamScreen() {
 
     if (result.canceled || !result.assets.length) return;
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newImages = result.assets.map((asset) => ({
       uri: asset.uri,
       fileName: asset.fileName ?? `image-${Date.now()}.png`,
@@ -141,7 +166,7 @@ export default function StreamScreen() {
   }, []);
 
   const removeImage = useCallback((index: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
@@ -150,7 +175,7 @@ export default function StreamScreen() {
     if (!client) return;
     if (!inputText.trim() && pendingImages.length === 0) return;
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const text = inputText.trim();
     const images = [...pendingImages];
 
@@ -184,28 +209,10 @@ export default function StreamScreen() {
   const switchTab = (tab: PaneTab) => {
     if (tab === activeTab) return;
     setActiveTab(tab);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const insets = useSafeAreaInsets();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-  useEffect(() => {
-    const showSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => setKeyboardHeight(e.endCoordinates.height)
-    );
-    const hideSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardHeight(0)
-    );
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  const bottomPadding = keyboardHeight > 0 ? keyboardHeight : insets.bottom;
   const hasContent = inputText.trim().length > 0 || pendingImages.length > 0;
 
   const statusColor =
@@ -216,7 +223,11 @@ export default function StreamScreen() {
         : catppuccin.overlay0;
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={insets.top + 44}
+    >
       <Stack.Screen options={{ title: displayName ?? 'Terminal' }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Menu icon="ellipsis">
@@ -232,7 +243,7 @@ export default function StreamScreen() {
 
       {/* Terminal */}
       <View style={styles.terminal}>
-        <NativeTerminalView frame={latestFrame} />
+        <NativeTerminalView ref={terminalRef} />
       </View>
 
       {/* Pane tab switcher */}
@@ -255,9 +266,49 @@ export default function StreamScreen() {
         </Pressable>
       </View>
 
-      {/* Compose area */}
-      <View style={styles.compose}>
-        {/* Image thumbnails */}
+      <ComposeBar
+        inputText={inputText}
+        setInputText={setInputText}
+        pendingImages={pendingImages}
+        removeImage={removeImage}
+        handleImagePick={handleImagePick}
+        handleSkills={handleSkills}
+        handleMic={handleMic}
+        recognizing={recognizing}
+        handleSend={handleSend}
+        hasContent={hasContent}
+        uploading={uploading}
+        bottomInset={insets.bottom}
+      />
+      <SkillsSheet ref={skillsRef} skills={skills} onSelect={handleSkillSelect} />
+    </KeyboardAvoidingView>
+  );
+}
+
+interface ComposeBarProps {
+  inputText: string;
+  setInputText: (text: string) => void;
+  pendingImages: PendingImage[];
+  removeImage: (index: number) => void;
+  handleImagePick: () => void;
+  handleSkills: () => void;
+  handleMic: () => void;
+  recognizing: boolean;
+  handleSend: () => void;
+  hasContent: boolean;
+  uploading: boolean;
+  bottomInset: number;
+}
+
+const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
+  const {
+    inputText, setInputText, pendingImages, removeImage,
+    handleImagePick, handleSkills, handleMic, recognizing,
+    handleSend, hasContent, uploading, bottomInset,
+  } = props;
+
+  return (
+    <View style={styles.compose}>
         {pendingImages.length > 0 && (
           <ScrollView
             horizontal
@@ -273,14 +324,13 @@ export default function StreamScreen() {
                   onPress={() => removeImage(i)}
                   hitSlop={6}
                 >
-                  <FontAwesome name="times-circle" size={18} color={catppuccin.red} />
+                  <SymbolView name="xmark.circle.fill" size={18} tintColor={catppuccin.red} />
                 </Pressable>
               </View>
             ))}
           </ScrollView>
         )}
 
-        {/* Input field — full width with border outline */}
         <View style={styles.inputWrapper}>
           <TextInput
             style={styles.input}
@@ -296,44 +346,46 @@ export default function StreamScreen() {
           />
         </View>
 
-        {/* Action buttons row */}
         <View style={styles.actionsRow}>
-          <Pressable onPress={handleImagePick} hitSlop={8} style={styles.attachButton}>
-            <FontAwesome name="plus" size={18} color={catppuccin.overlay1} />
-          </Pressable>
+          <View style={styles.actionsLeft}>
+            <AnimatedIconButton onPress={handleImagePick} hitSlop={8} style={styles.attachButton}>
+              <SymbolView name="plus" size={18} tintColor={catppuccin.overlay1} />
+            </AnimatedIconButton>
+            <AnimatedIconButton onPress={handleSkills} hitSlop={8} style={styles.skillsButton}>
+              <SymbolView name="sparkles" size={18} tintColor={catppuccin.overlay1} />
+            </AnimatedIconButton>
+          </View>
           <View style={styles.actionsRight}>
-            <Pressable
+            <AnimatedIconButton
               onPress={handleMic}
               hitSlop={8}
               style={[styles.micButton, recognizing && styles.micButtonActive]}
             >
-              <FontAwesome
-                name="microphone"
+              <SymbolView
+                name="mic.fill"
                 size={18}
-                color={recognizing ? catppuccin.red : catppuccin.overlay1}
+                tintColor={recognizing ? catppuccin.red : catppuccin.overlay1}
+                animationSpec={{ effect: { type: 'bounce' } }}
               />
-            </Pressable>
-            <Pressable
+            </AnimatedIconButton>
+            <AnimatedIconButton
               style={[styles.sendButton, !hasContent && styles.sendButtonDisabled]}
               onPress={handleSend}
               disabled={!hasContent || uploading}
             >
-              <FontAwesome
-                name="arrow-up"
+              <SymbolView
+                name="arrow.up"
                 size={16}
-                color={hasContent ? catppuccin.base : catppuccin.surface2}
+                tintColor={hasContent ? catppuccin.base : catppuccin.surface2}
               />
-            </Pressable>
+            </AnimatedIconButton>
           </View>
         </View>
 
-        {/* Safe area spacer */}
-        <View style={{ height: bottomPadding }} />
-      </View>
-
+        <View style={{ height: bottomInset }} />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -387,12 +439,14 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 8,
+    borderCurve: 'continuous',
     overflow: 'visible',
   },
   thumbnailImage: {
     width: 56,
     height: 56,
     borderRadius: 8,
+    borderCurve: 'continuous',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: catppuccin.surface2,
   },
@@ -402,12 +456,14 @@ const styles = StyleSheet.create({
     right: -6,
     backgroundColor: catppuccin.mantle,
     borderRadius: 9,
+    borderCurve: 'continuous',
   },
   inputWrapper: {
     marginTop: 12,
     borderWidth: 1,
     borderColor: catppuccin.surface2,
     borderRadius: 22,
+    borderCurve: 'continuous',
     backgroundColor: 'transparent',
   },
   input: {
@@ -426,10 +482,26 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 8,
   },
+  actionsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   attachButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: catppuccin.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skillsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: catppuccin.surface2,
     alignItems: 'center',
@@ -444,6 +516,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: catppuccin.surface2,
     alignItems: 'center',
@@ -457,6 +530,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    borderCurve: 'continuous',
     backgroundColor: catppuccin.lavender,
     alignItems: 'center',
     justifyContent: 'center',

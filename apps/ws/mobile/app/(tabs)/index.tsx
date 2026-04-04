@@ -1,9 +1,10 @@
-import { View, StyleSheet, RefreshControl, Pressable } from 'react-native';
+import { View, StyleSheet, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { SymbolView } from 'expo-symbols';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
+import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { StreamTreeItem } from '../../components/StreamTree';
 import { ConnectionBanner } from '../../components/ConnectionBanner';
 import type { AgentStatus, StreamNode } from '../../lib/types';
@@ -41,9 +42,9 @@ export default function StreamsScreen() {
         }
         contentContainerStyle={styles.listContent}
       />
-      <Pressable style={styles.fab} onPress={() => router.push('/create')}>
-        <FontAwesome name="plus" size={24} color={catppuccin.base} />
-      </Pressable>
+      <AnimatedIconButton style={styles.fab} onPress={() => router.push('/create')}>
+        <SymbolView name="plus" size={24} tintColor={catppuccin.base} />
+      </AnimatedIconButton>
     </View>
   );
 }
@@ -103,6 +104,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
+    borderCurve: 'continuous',
     backgroundColor: catppuccin.lavender,
     alignItems: 'center',
     justifyContent: 'center',

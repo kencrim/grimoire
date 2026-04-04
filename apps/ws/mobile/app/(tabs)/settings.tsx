@@ -1,7 +1,8 @@
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useRelay } from '../_layout';
 import { catppuccin } from '../../lib/theme';
+import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 
 export default function SettingsScreen() {
   const { config, connected, disconnect } = useRelay();
@@ -53,13 +54,13 @@ export default function SettingsScreen() {
       </View>
 
       {connected ? (
-        <Pressable style={styles.disconnectButton} onPress={handleDisconnect}>
+        <AnimatedIconButton style={styles.disconnectButton} onPress={handleDisconnect} pressScale={0.97}>
           <Text style={styles.disconnectText}>Disconnect</Text>
-        </Pressable>
+        </AnimatedIconButton>
       ) : (
-        <Pressable style={styles.disconnectButton} onPress={() => router.replace('/connect')}>
+        <AnimatedIconButton style={styles.disconnectButton} onPress={() => router.replace('/connect')} pressScale={0.97}>
           <Text style={styles.reconnectText}>Reconnect</Text>
-        </Pressable>
+        </AnimatedIconButton>
       )}
 
       <View style={styles.section}>
@@ -101,6 +102,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: catppuccin.surface0,
     borderRadius: 12,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   row: {
@@ -142,6 +144,7 @@ const styles = StyleSheet.create({
   disconnectButton: {
     backgroundColor: catppuccin.surface0,
     borderRadius: 12,
+    borderCurve: 'continuous',
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 24,
