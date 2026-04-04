@@ -1,6 +1,6 @@
 import Anser from 'anser';
 import { TextStyle } from 'react-native';
-import { catppuccin, xtermTheme } from './theme';
+import { hex, xtermTheme } from './theme';
 
 export interface StyledSpan {
   text: string;
@@ -11,7 +11,7 @@ export interface ParsedLine {
   spans: StyledSpan[];
 }
 
-// Map anser's class names for the 16 standard colors to Catppuccin,
+// Map anser's class names for the 16 standard colors to the Hex palette,
 // matching the xtermTheme mapping used by the xterm.js renderer.
 const FG_CLASS_MAP: Record<string, string> = {
   'ansi-black': xtermTheme.black,
@@ -38,7 +38,7 @@ const BG_CLASS_MAP: Record<string, string> = { ...FG_CLASS_MAP };
 const CUBE_STEPS = [0, 95, 135, 175, 215, 255];
 
 function palette256ToHex(index: number): string {
-  if (index < 16) return catppuccin.text; // shouldn't happen — anser uses class names
+  if (index < 16) return hex.text; // shouldn't happen — anser uses class names
   if (index < 232) {
     // 6×6×6 color cube
     const ci = index - 16;
@@ -84,7 +84,7 @@ export function parseTerminalContent(content: string): ParsedLine[] {
   const cleaned = content.replace(NON_SGR_RE, '').replace(/\r\n?/g, '\n');
 
   // Parse with anser — use_classes gives us named colors for the 16 standard
-  // colors so we can map them to Catppuccin.
+  // colors so we can map them to the Hex palette.
   const chunks = Anser.ansiToJson(cleaned, { use_classes: true });
 
   // Split anser chunks into lines. A single chunk may span multiple lines.

@@ -9,7 +9,7 @@ import {
   toPaneInput,
 } from '../lib/terminal-bridge';
 import type { PaneFrame, PaneInputMsg } from '../lib/types';
-import { catppuccin } from '../lib/theme';
+import { hex } from '../lib/theme';
 
 interface TerminalViewProps {
   onInput: (input: PaneInputMsg) => void;
@@ -81,7 +81,7 @@ export { type TerminalViewProps };
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: catppuccin.base,
+    backgroundColor: hex.base,
   },
   webview: {
     flex: 1,

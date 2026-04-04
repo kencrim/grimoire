@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { Redirect } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useRelay } from '../_layout';
-import { catppuccin } from '../../lib/theme';
+import { hex } from '../../lib/theme';
 
 export default function TabLayout() {
   const { connected, ready } = useRelay();
@@ -15,14 +15,14 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: catppuccin.lavender,
-        tabBarInactiveTintColor: catppuccin.overlay0,
+        tabBarActiveTintColor: hex.accent,
+        tabBarInactiveTintColor: hex.overlay0,
         tabBarStyle: {
-          backgroundColor: catppuccin.mantle,
-          borderTopColor: catppuccin.surface0,
+          backgroundColor: hex.mantle,
+          borderTopColor: hex.surface0,
         },
-        headerStyle: { backgroundColor: catppuccin.mantle },
-        headerTintColor: catppuccin.text,
+        headerStyle: { backgroundColor: hex.mantle },
+        headerTintColor: hex.text,
       }}
     >
       <Tabs.Screen

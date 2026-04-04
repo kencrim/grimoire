@@ -1,5 +1,5 @@
 {
-  "name": "grimoire-mobile",
+  "name": "hex-mobile",
   "version": "0.1.0",
   "private": true,
   "main": "expo-router/entry",
@@ -10,6 +10,8 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@expo/metro": "^55.0.0",
     "@expo/metro-runtime": "^55.0.9",
     "@expo/vector-icons": "^15.1.1",

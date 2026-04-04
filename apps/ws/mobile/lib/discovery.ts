@@ -2,7 +2,7 @@ import * as MdnsDiscovery from '../modules/mdns-discovery';
 import * as SecureStore from 'expo-secure-store';
 import type { ConnectionConfig } from './types';
 
-const TAILSCALE_HOST_KEY = 'grimoire_ts_host';
+const TAILSCALE_HOST_KEY = 'hex_ts_host';
 const MDNS_SCAN_DURATION = 5000;
 
 type DebugCallback = (msg: string) => void;
@@ -15,7 +15,7 @@ export interface DiscoveredDaemon {
   type: 'lan' | 'tailscale' | 'saved';
 }
 
-// discoverDaemons scans for grimoire relay daemons via mDNS and saved connections.
+// discoverDaemons scans for hex relay daemons via mDNS and saved connections.
 export async function discoverDaemons(
   savedConfig: ConnectionConfig | null,
   onDebug?: DebugCallback
@@ -80,8 +80,8 @@ function scanMDNS(log: DebugCallback): Promise<DiscoveredDaemon[]> {
       log(`mDNS error: ${err.message}`);
     });
 
-    log('mDNS scanning for _grimoire._tcp');
-    MdnsDiscovery.startScan('_grimoire._tcp');
+    log('mDNS scanning for _hex._tcp');
+    MdnsDiscovery.startScan('_hex._tcp');
 
     setTimeout(() => {
       MdnsDiscovery.stopScan();

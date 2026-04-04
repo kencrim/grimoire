@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name           = 'MdnsDiscovery'
   s.version        = '0.1.0'
-  s.summary        = 'mDNS/Bonjour service discovery for Grimoire'
+  s.summary        = 'mDNS/Bonjour service discovery for Hex'
   s.homepage       = 'https://github.com/kencrim/grimoire'
   s.license        = 'MIT'
   s.author         = 'Ken Crimmins'

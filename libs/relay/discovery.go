@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	mdnsService = "_grimoire._tcp"
+	mdnsService = "_hex._tcp"
 )
 
 // Discovery manages mDNS service advertisement and Tailscale hostname detection.
@@ -31,7 +31,7 @@ func NewDiscovery(port int, token string) *Discovery {
 	return d
 }
 
-// StartMDNS begins advertising the grimoire service via the system mDNSResponder.
+// StartMDNS begins advertising the hex service via the system mDNSResponder.
 // Uses dns-sd -R which goes through macOS's built-in Bonjour, ensuring proper
 // multicast delivery that works through the firewall.
 func (d *Discovery) StartMDNS() error {
@@ -39,7 +39,7 @@ func (d *Discovery) StartMDNS() error {
 
 	// Build TXT record key=value pairs as arguments to dns-sd -R
 	txtArgs := []string{
-		"-R", "Grimoire Relay",  // instance name
+		"-R", "Hex Relay",  // instance name
 		mdnsService,             // service type
 		"local",                 // domain
 		fmt.Sprintf("%d", d.port), // port
