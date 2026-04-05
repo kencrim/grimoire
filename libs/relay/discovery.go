@@ -17,15 +17,22 @@ type Discovery struct {
 	dnssdCmd      *exec.Cmd // dns-sd -R process
 	port          int
 	token         string
+	name          string
 	tailscaleHost string
 	tailscaleIP   string
 }
 
 // NewDiscovery creates a discovery manager for the given WS port and auth token.
-func NewDiscovery(port int, token string) *Discovery {
+// name is the display name for mDNS advertisement; if empty, defaults to the system hostname.
+func NewDiscovery(port int, token string, name string) *Discovery {
+	if name == "" {
+		hostname, _ := os.Hostname()
+		name = hostname
+	}
 	d := &Discovery{
 		port:  port,
 		token: token,
+		name:  name,
 	}
 	d.detectTailscale()
 	return d
@@ -39,7 +46,7 @@ func (d *Discovery) StartMDNS() error {
 
 	// Build TXT record key=value pairs as arguments to dns-sd -R
 	txtArgs := []string{
-		"-R", "Hex Relay",  // instance name
+		"-R", d.name,  // instance name
 		mdnsService,             // service type
 		"local",                 // domain
 		fmt.Sprintf("%d", d.port), // port

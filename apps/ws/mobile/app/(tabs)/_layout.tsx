@@ -1,17 +1,9 @@
 import { Tabs } from 'expo-router';
-import { Redirect } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { useRelay } from '../_layout';
 import { hex } from '../../lib/theme';
+import { PixelDaemon } from '../../components/PixelDaemon';
 
 export default function TabLayout() {
-  const { connected, ready } = useRelay();
-
-  // Redirect to connect screen if not connected (and done loading)
-  if (ready && !connected) {
-    return <Redirect href="/connect" />;
-  }
-
   return (
     <Tabs
       screenOptions={{
@@ -28,8 +20,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Streams',
-          tabBarIcon: ({ color }) => <SymbolView name="square.grid.2x2" size={20} tintColor={color} />,
+          title: 'Daemons',
+          tabBarIcon: ({ color }) => <PixelDaemon size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="manage"
+        options={{
+          title: 'Manage',
+          tabBarIcon: ({ color }) => <SymbolView name="plus.circle" size={20} tintColor={color} />,
         }}
       />
       <Tabs.Screen

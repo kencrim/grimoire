@@ -49,6 +49,20 @@ export interface ConnectionConfig {
   token: string;
 }
 
+/** Persistent identity for a saved daemon connection */
+export interface DaemonEntry {
+  id: string;
+  name: string;
+  config: ConnectionConfig;
+  addedAt: string;
+}
+
+/** Agent annotated with daemon ownership */
+export interface QualifiedAgent extends AgentStatus {
+  daemonId: string;
+  qualifiedId: string;
+}
+
 // DAG tree node for display
 export interface StreamNode {
   id: string;

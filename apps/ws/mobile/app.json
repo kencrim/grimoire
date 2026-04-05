@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hex.app",
+      "bundleIdentifier": "com.clockwork.hex",
       "infoPlist": {
         "NSCameraUsageDescription": "Hex needs camera access to scan QR codes for daemon pairing.",
         "NSLocalNetworkUsageDescription": "Hex uses local network to discover relay daemons.",
@@ -24,7 +24,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1e1e2e"
       },
-      "package": "com.hex.app"
+      "package": "com.clockwork.hex"
     },
     "plugins": [
       "expo-router",

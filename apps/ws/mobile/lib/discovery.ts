@@ -17,7 +17,7 @@ export interface DiscoveredDaemon {
 
 // discoverDaemons scans for hex relay daemons via mDNS and saved connections.
 export async function discoverDaemons(
-  savedConfig: ConnectionConfig | null,
+  savedConfigs: ConnectionConfig[],
   onDebug?: DebugCallback
 ): Promise<DiscoveredDaemon[]> {
   const log = onDebug ?? (() => {});
@@ -27,7 +27,7 @@ export async function discoverDaemons(
 
   const [mdnsResults] = await Promise.allSettled([
     scanMDNS(log),
-    probeSavedConnections(savedConfig, found, log),
+    probeSavedConnections(savedConfigs, found, log),
   ]);
 
   if (mdnsResults.status === 'fulfilled') {
@@ -36,12 +36,17 @@ export async function discoverDaemons(
     log(`mDNS scan failed: ${mdnsResults.reason}`);
   }
 
-  // Deduplicate by host:port
-  const seen = new Set<string>();
+  // Deduplicate by host:port AND by service name (same daemon can appear
+  // at multiple IPs — LAN, link-local, Tailscale)
+  const seenHostPort = new Set<string>();
+  const seenLabel = new Set<string>();
   return found.filter((d) => {
-    const key = `${d.host}:${d.port}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const hostKey = `${d.host}:${d.port}`;
+    if (seenHostPort.has(hostKey)) return false;
+    // Same service name at a different IP = same daemon
+    if (seenLabel.has(d.label)) return false;
+    seenHostPort.add(hostKey);
+    seenLabel.add(d.label);
     return true;
   });
 }
@@ -66,7 +71,7 @@ function scanMDNS(log: DebugCallback): Promise<DiscoveredDaemon[]> {
           host,
           port: service.port,
           token,
-          label: token ? `${service.name} (${host})` : `${service.name} (${host}) — needs token`,
+          label: service.name,
           type: isTailscale ? 'tailscale' : 'lan',
         });
 
@@ -94,24 +99,29 @@ function scanMDNS(log: DebugCallback): Promise<DiscoveredDaemon[]> {
 }
 
 async function probeSavedConnections(
-  savedConfig: ConnectionConfig | null,
+  savedConfigs: ConnectionConfig[],
   found: DiscoveredDaemon[],
   log: DebugCallback
 ): Promise<void> {
   const checks: Promise<void>[] = [];
+  const probed = new Set<string>();
 
-  if (savedConfig) {
-    log(`Probing saved: ${savedConfig.host}:${savedConfig.port}`);
+  for (const cfg of savedConfigs) {
+    const key = `${cfg.host}:${cfg.port}`;
+    if (probed.has(key)) continue;
+    probed.add(key);
+
+    log(`Probing saved: ${cfg.host}:${cfg.port}`);
     checks.push(
-      probeHost(savedConfig.host, savedConfig.port).then((ok) => {
-        log(`Saved probe ${savedConfig.host}: ${ok ? 'reachable' : 'unreachable'}`);
+      probeHost(cfg.host, cfg.port).then((ok) => {
+        log(`Saved probe ${cfg.host}: ${ok ? 'reachable' : 'unreachable'}`);
         if (ok) {
           found.push({
-            host: savedConfig.host,
-            port: savedConfig.port,
-            token: savedConfig.token,
-            label: `Last connected (${savedConfig.host})`,
-            type: savedConfig.host.includes('.ts.net') ? 'tailscale' : 'saved',
+            host: cfg.host,
+            port: cfg.port,
+            token: cfg.token,
+            label: `Saved (${cfg.host})`,
+            type: cfg.host.includes('.ts.net') ? 'tailscale' : 'saved',
           });
         }
       })
@@ -120,7 +130,7 @@ async function probeSavedConnections(
 
   // Probe saved Tailscale config independently — works even after disconnect
   const tsConfig = await getSavedTailscaleConfig();
-  if (tsConfig && tsConfig.host !== savedConfig?.host) {
+  if (tsConfig && !probed.has(`${tsConfig.host}:${tsConfig.port}`)) {
     log(`Probing Tailscale: ${tsConfig.host}:${tsConfig.port}`);
     checks.push(
       probeHost(tsConfig.host, tsConfig.port).then((ok) => {

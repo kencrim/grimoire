@@ -35,6 +35,7 @@ var daemonStartCmd = &cobra.Command{
 		socketPath := relay.DefaultSocketPath()
 		foreground, _ := cmd.Flags().GetBool("foreground")
 		wsPort, _ := cmd.Flags().GetInt("ws-port")
+		daemonName, _ := cmd.Flags().GetString("name")
 		tsnetEnabled, _ := cmd.Flags().GetBool("tsnet")
 		tsnetHostname, _ := cmd.Flags().GetString("tsnet-hostname")
 
@@ -373,7 +374,7 @@ var daemonStartCmd = &cobra.Command{
 			}
 
 			// Start mDNS/Bonjour advertisement + Tailscale detection
-			disco = relay.NewDiscovery(wsPort, wsSrv.Token())
+			disco = relay.NewDiscovery(wsPort, wsSrv.Token(), daemonName)
 
 			// If tsnet is active, override the Tailscale hostname with the tsnet FQDN
 			if tsNode != nil && tsNode.FQDN() != "" {
@@ -577,6 +578,7 @@ func init() {
 	daemonStartCmd.Flags().Bool("foreground", false, "Run in foreground (used internally)")
 	daemonStartCmd.Flags().MarkHidden("foreground")
 	daemonStartCmd.Flags().Int("ws-port", 8077, "Port for WebSocket server (0 = disabled)")
+	daemonStartCmd.Flags().String("name", "", "Display name for this daemon (default: system hostname)")
 	daemonStartCmd.Flags().Bool("tsnet", false, "Enable embedded Tailscale node for remote access")
 	daemonStartCmd.Flags().String("tsnet-hostname", "hex", "Hostname for the tsnet node on the tailnet")
 	daemonCmd.AddCommand(daemonStartCmd)

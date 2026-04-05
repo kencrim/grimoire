@@ -21,7 +21,7 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
-import { useRelay } from '../_layout';
+import { useDaemons } from '../_layout';
 import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { SkillsSheet } from '../../components/SkillsSheet';
 import { NativeTerminalView, type NativeTerminalHandle } from '../../components/NativeTerminalView';
@@ -38,7 +38,14 @@ interface PendingImage {
 
 export default function StreamScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { client, agents } = useRelay();
+  const { resolveAgent } = useDaemons();
+
+  // Resolve the qualified ID to get the daemon's client and agent
+  const resolved = resolveAgent(id ?? '');
+  const client = resolved?.daemon.client ?? null;
+  const agent = resolved?.agent ?? null;
+  const agentRef = agent?.id ?? ''; // Unqualified ID for the daemon API
+
   const [activeTab, setActiveTab] = useState<PaneTab>('agent');
   const [inputText, setInputText] = useState('');
   const terminalRef = useRef<NativeTerminalHandle>(null);
@@ -50,9 +57,9 @@ export default function StreamScreen() {
 
   // Fetch available skills on mount
   useEffect(() => {
-    if (!client || !id) return;
-    client.getSkills(id).then(setSkills).catch(() => {});
-  }, [client, id]);
+    if (!client || !agentRef) return;
+    client.getSkills(agentRef).then(setSkills).catch(() => {});
+  }, [client, agentRef]);
 
   const handleSkills = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -104,9 +111,7 @@ export default function StreamScreen() {
     });
   }, [recognizing]);
 
-  // Find the agent to get pane info
-  const agent = agents.find((a) => a.id === id);
-  const displayName = id?.includes('/') ? id.split('/').pop() : id;
+  const displayName = agentRef.includes('/') ? agentRef.split('/').pop() : agentRef;
 
   const handleActions = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -119,15 +124,12 @@ export default function StreamScreen() {
           text: 'Kill',
           style: 'destructive',
           onPress: () => {
-            client?.killAgent(id ?? '').then(() => router.back());
+            client?.killAgent(agentRef).then(() => router.back());
           },
         },
       ],
     );
-  }, [client, id, displayName]);
-
-  // The agent ID is what we pass to the daemon — it resolves the pane internally
-  const agentRef = id ?? '';
+  }, [client, agentRef, displayName]);
 
   // Connect pane WebSocket and push frames directly to terminal (no parent re-render)
   useEffect(() => {
@@ -187,10 +189,7 @@ export default function StreamScreen() {
     if (images.length > 0) {
       setUploading(true);
       try {
-        // Single batch request — no concurrent upload issues
         const paths = await client.uploadImages(images);
-        // Send each path as its own submitted line so the agent sees each image,
-        // then send the text message last
         for (const p of paths) {
           client.sendPaneInput({ type: 'input_submit', data: p });
         }
