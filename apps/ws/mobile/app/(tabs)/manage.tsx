@@ -1,44 +1,74 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
-import { Redirect } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
-import { useRelay } from './_layout';
-import { hex } from '../lib/theme';
-import { parseHexUri } from '../lib/relay-client';
-import { discoverDaemons, saveTailscaleConfig, type DiscoveredDaemon } from '../lib/discovery';
-import { AnimatedIconButton } from '../components/AnimatedIconButton';
+import { useDaemons } from '../_layout';
+import { hex } from '../../lib/theme';
+import { parseHexUri } from '../../lib/relay-client';
+import { discoverDaemons, saveTailscaleConfig, type DiscoveredDaemon } from '../../lib/discovery';
+import { AnimatedIconButton } from '../../components/AnimatedIconButton';
+import type { ConnectionConfig } from '../../lib/types';
 
-export default function ConnectScreen() {
-  const { connected, connect, connectFromUri, config } = useRelay();
+export default function ManageScreen() {
+  const {
+    daemons,
+    daemonOrder,
+    addDaemon,
+    removeDaemon,
+    connectDaemon,
+    disconnectDaemon,
+    connectFromUri,
+  } = useDaemons();
+
   const [permission, requestPermission] = useCameraPermissions();
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [discovered, setDiscovered] = useState<DiscoveredDaemon[]>([]);
+  const [allDiscovered, setAllDiscovered] = useState<DiscoveredDaemon[]>([]);
   const [scanning, setScanning] = useState(false);
 
-  useEffect(() => {
-    if (!connected) {
-      runDiscovery();
+  // Live-filter discovered: hide anything already saved (by host:port OR name)
+  const existingKeys = useMemo(() => {
+    const hosts = new Set<string>();
+    const names = new Set<string>();
+    for (const id of daemonOrder) {
+      const d = daemons.get(id);
+      if (d) {
+        hosts.add(`${d.entry.config.host}:${d.entry.config.port}`);
+        names.add(d.entry.name);
+      }
     }
+    return { hosts, names };
+  }, [daemons, daemonOrder]);
+
+  const discovered = useMemo(
+    () => allDiscovered.filter(d =>
+      !existingKeys.hosts.has(`${d.host}:${d.port}`) && !existingKeys.names.has(d.label)
+    ),
+    [allDiscovered, existingKeys],
+  );
+
+  useEffect(() => {
+    runDiscovery();
   }, []);
 
-  if (connected) {
-    return <Redirect href="/(tabs)" />;
-  }
-
   const runDiscovery = async () => {
+    const savedConfigs: ConnectionConfig[] = daemonOrder
+      .map(id => daemons.get(id)?.entry.config)
+      .filter(Boolean) as ConnectionConfig[];
+
     setScanning(true);
     try {
-      const results = await discoverDaemons(config);
-      setDiscovered(results);
+      const results = await discoverDaemons(savedConfigs);
+      setAllDiscovered(results);
     } catch {
       // ignore
     }
@@ -54,12 +84,13 @@ export default function ConnectScreen() {
       saveTailscaleConfig({ host: daemon.host, port: daemon.port, token: daemon.token });
     }
 
-    const ok = await connect({
+    const entry = addDaemon(daemon.label, {
       host: daemon.host,
       port: daemon.port,
       token: daemon.token,
     });
 
+    const ok = await connectDaemon(entry.id);
     setLoading(false);
     if (!ok) {
       setError(`Could not connect to ${daemon.host}`);
@@ -78,10 +109,6 @@ export default function ConnectScreen() {
       return;
     }
 
-    if (parsed.host.includes('.ts.net')) {
-      saveTailscaleConfig({ host: parsed.host, port: parsed.port, token: parsed.token });
-    }
-
     const ok = await connectFromUri(data);
     setLoading(false);
     if (!ok) {
@@ -89,14 +116,40 @@ export default function ConnectScreen() {
     }
   };
 
+  const handleRemove = (daemonId: string, name: string) => {
+    Alert.alert('Remove daemon?', `Remove "${name}" from your saved daemons.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => removeDaemon(daemonId),
+      },
+    ]);
+  };
+
+  const handleToggleConnection = async (daemonId: string, connected: boolean) => {
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (connected) {
+      disconnectDaemon(daemonId);
+    } else {
+      setLoading(true);
+      setError('');
+      const ok = await connectDaemon(daemonId);
+      setLoading(false);
+      if (!ok) {
+        setError('Could not reconnect. Is the daemon running?');
+      }
+    }
+  };
+
   if (showScanner) {
     if (!permission?.granted) {
       return (
-        <View style={styles.container}>
+        <View style={styles.centered}>
           <Text style={styles.title}>Camera Permission</Text>
           <Text style={styles.subtitle}>We need camera access to scan QR codes.</Text>
-          <AnimatedIconButton style={styles.button} onPress={requestPermission} pressScale={0.97}>
-            <Text style={styles.buttonText}>Grant Permission</Text>
+          <AnimatedIconButton style={styles.primaryButton} onPress={requestPermission} pressScale={0.97}>
+            <Text style={styles.primaryButtonText}>Grant Permission</Text>
           </AnimatedIconButton>
           <AnimatedIconButton style={styles.linkButton} onPress={() => setShowScanner(false)} pressScale={0.92}>
             <Text style={styles.linkText}>Back</Text>
@@ -106,7 +159,7 @@ export default function ConnectScreen() {
     }
 
     return (
-      <View style={styles.container}>
+      <View style={styles.centered}>
         <Text style={styles.title}>Scan QR Code</Text>
         <Text style={styles.subtitle}>
           Point at the QR code shown by{'\n'}`ws daemon connect`
@@ -131,29 +184,67 @@ export default function ConnectScreen() {
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.logo}>hex</Text>
-      <Text style={styles.subtitle}>Connect to your relay daemon</Text>
+      {/* Saved daemons */}
+      {daemonOrder.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Your Daemons</Text>
+          {daemonOrder.map(id => {
+            const state = daemons.get(id);
+            if (!state) return null;
+            return (
+              <View key={id} style={styles.row}>
+                <AnimatedIconButton
+                  style={styles.rowMain}
+                  onPress={() => handleToggleConnection(id, state.connected)}
+                  pressScale={0.97}
+                >
+                  <View style={[styles.dot, state.connected ? styles.dotGreen : styles.dotRed]} />
+                  <View style={styles.rowInfo}>
+                    <Text style={styles.rowName}>{state.entry.name}</Text>
+                    <Text style={styles.rowHost}>
+                      {state.entry.config.host}:{state.entry.config.port}
+                    </Text>
+                  </View>
+                  <Text style={[styles.rowAction, state.connected && styles.rowActionDisconnect]}>
+                    {state.connected ? 'Disconnect' : 'Connect'}
+                  </Text>
+                </AnimatedIconButton>
+                <AnimatedIconButton
+                  style={styles.rowRemove}
+                  onPress={() => handleRemove(id, state.entry.name)}
+                  pressScale={0.85}
+                  hitSlop={4}
+                >
+                  <SymbolView name="trash" size={16} tintColor={hex.overlay0} />
+                </AnimatedIconButton>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
-      {/* Discovered daemons */}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {/* Discovered daemons (filtered to exclude already-saved) */}
       {discovered.length > 0 && (
-        <View style={styles.discoveredSection}>
+        <View style={styles.section}>
           <Text style={styles.sectionLabel}>Discovered</Text>
           {discovered.map((d) => (
             <AnimatedIconButton
-              key={d.host}
-              style={styles.discoveredItem}
+              key={`${d.host}:${d.port}`}
+              style={styles.rowDiscovered}
               onPress={() => handleDiscoveredConnect(d)}
               disabled={loading}
               pressScale={0.97}
             >
-              <View style={styles.discoveredDot} />
-              <View style={styles.discoveredInfo}>
-                <Text style={styles.discoveredLabel}>{d.label}</Text>
-                <Text style={styles.discoveredHost}>
+              <View style={[styles.dot, styles.dotYellow]} />
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowName}>{d.label}</Text>
+                <Text style={styles.rowHost}>
                   {d.host}:{d.port}
                 </Text>
               </View>
-              <Text style={styles.discoveredType}>{d.type}</Text>
+              <Text style={styles.rowAction}>Add</Text>
             </AnimatedIconButton>
           ))}
         </View>
@@ -166,15 +257,13 @@ export default function ConnectScreen() {
         </View>
       )}
 
-      {!scanning && discovered.length === 0 && (
+      {!scanning && discovered.length === 0 && daemonOrder.length === 0 && (
         <Text style={styles.noDiscovered}>No daemons found on network</Text>
       )}
 
       <AnimatedIconButton style={styles.rescanButton} onPress={runDiscovery} disabled={scanning} pressScale={0.92}>
         <Text style={styles.rescanText}>Rescan</Text>
       </AnimatedIconButton>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.divider}>
         <View style={styles.dividerLine} />
@@ -183,19 +272,19 @@ export default function ConnectScreen() {
       </View>
 
       <AnimatedIconButton
-        style={[styles.scanButton, loading && styles.buttonDisabled]}
+        style={[styles.primaryButton, loading && styles.buttonDisabled]}
         onPress={() => setShowScanner(true)}
         disabled={loading}
         pressScale={0.97}
       >
-        <Text style={styles.scanButtonText}>Scan QR Code</Text>
+        <Text style={styles.primaryButtonText}>Scan QR Code</Text>
       </AnimatedIconButton>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centered: {
     flex: 1,
     backgroundColor: hex.base,
     justifyContent: 'center',
@@ -204,17 +293,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 80,
+    backgroundColor: hex.base,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 40,
-  },
-  logo: {
-    fontSize: 32,
-    fontFamily: 'SpaceGrotesk_700Bold',
-    color: hex.accent,
-    letterSpacing: -0.5,
-    marginBottom: 6,
   },
   title: {
     fontSize: 24,
@@ -229,8 +311,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
-  discoveredSection: {
-    width: '100%',
+  section: {
     marginBottom: 24,
   },
   sectionLabel: {
@@ -242,46 +323,78 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 4,
   },
-  discoveredItem: {
+  // Shared row styles for both sections
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: hex.surface0,
-    borderRadius: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     marginBottom: 8,
   },
-  discoveredDot: {
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  rowDiscovered: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: hex.surface0,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  rowRemove: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: hex.green,
     marginRight: 10,
   },
-  discoveredInfo: {
+  dotGreen: {
+    backgroundColor: hex.green,
+  },
+  dotRed: {
+    backgroundColor: hex.red,
+  },
+  dotYellow: {
+    backgroundColor: hex.yellow,
+  },
+  rowInfo: {
     flex: 1,
   },
-  discoveredLabel: {
+  rowName: {
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: 'SpaceGrotesk_600SemiBold',
     color: hex.text,
   },
-  discoveredHost: {
+  rowHost: {
     fontSize: 12,
     color: hex.subtext0,
     marginTop: 2,
     fontFamily: 'JetBrainsMono_400Regular',
   },
-  discoveredType: {
-    fontSize: 11,
-    color: hex.overlay0,
+  rowAction: {
+    fontSize: 12,
+    color: hex.accent,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
     textTransform: 'uppercase',
+  },
+  rowActionDisconnect: {
+    color: hex.overlay0,
   },
   scanningRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 12,
+    justifyContent: 'center',
   },
   scanningText: {
     fontSize: 13,
@@ -291,9 +404,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: hex.overlay0,
     marginBottom: 8,
+    textAlign: 'center',
   },
   rescanButton: {
     marginBottom: 24,
+    alignSelf: 'center',
   },
   rescanText: {
     fontSize: 14,
@@ -303,7 +418,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 24,
-    width: '100%',
   },
   dividerLine: {
     flex: 1,
@@ -315,33 +429,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginHorizontal: 12,
   },
-  scanButton: {
+  primaryButton: {
     backgroundColor: hex.accent,
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 0,
+    alignSelf: 'center',
   },
-  scanButtonText: {
+  primaryButtonText: {
     color: hex.base,
     fontSize: 16,
     fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  button: {
-    backgroundColor: hex.accent,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 0,
-    marginTop: 8,
-    width: '100%',
-    alignItems: 'center',
   },
   buttonDisabled: {
     opacity: 0.6,
-  },
-  buttonText: {
-    color: hex.base,
-    fontSize: 16,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   linkButton: {
     marginTop: 16,
@@ -354,6 +455,7 @@ const styles = StyleSheet.create({
     color: hex.red,
     fontSize: 13,
     marginBottom: 12,
+    textAlign: 'center',
   },
   cameraContainer: {
     width: 280,

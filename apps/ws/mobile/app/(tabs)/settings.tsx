@@ -1,67 +1,29 @@
-import { View, Text, StyleSheet, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useRelay } from '../_layout';
+import { View, Text, StyleSheet } from 'react-native';
+import { useDaemons } from '../_layout';
 import { hex } from '../../lib/theme';
-import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 
 export default function SettingsScreen() {
-  const { config, connected, disconnect } = useRelay();
-  const router = useRouter();
+  const { daemons, daemonOrder } = useDaemons();
 
-  const handleDisconnect = () => {
-    Alert.alert('Disconnect', 'This will disconnect from the relay daemon.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Disconnect',
-        style: 'destructive',
-        onPress: () => {
-          disconnect();
-          router.replace('/connect');
-        },
-      },
-    ]);
-  };
+  const connectedCount = daemonOrder.filter(id => daemons.get(id)?.connected).length;
+  const totalCount = daemonOrder.length;
 
   return (
     <View style={styles.container}>
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Connection</Text>
+        <Text style={styles.sectionTitle}>Daemons</Text>
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.label}>Status</Text>
+            <Text style={styles.label}>Connected</Text>
             <View style={styles.statusRow}>
-              <View style={[styles.dot, connected ? styles.dotGreen : styles.dotRed]} />
-              <Text style={styles.value}>{connected ? 'Connected' : 'Disconnected'}</Text>
+              <View style={[styles.dot, connectedCount > 0 ? styles.dotGreen : styles.dotRed]} />
+              <Text style={styles.value}>
+                {connectedCount} of {totalCount}
+              </Text>
             </View>
           </View>
-          {config && (
-            <>
-              <View style={styles.separator} />
-              <View style={styles.row}>
-                <Text style={styles.label}>Host</Text>
-                <Text style={styles.value}>
-                  {config.host}:{config.port}
-                </Text>
-              </View>
-              <View style={styles.separator} />
-              <View style={styles.row}>
-                <Text style={styles.label}>Token</Text>
-                <Text style={styles.value}>{config.token.slice(0, 12)}...</Text>
-              </View>
-            </>
-          )}
         </View>
       </View>
-
-      {connected ? (
-        <AnimatedIconButton style={styles.disconnectButton} onPress={handleDisconnect} pressScale={0.97}>
-          <Text style={styles.disconnectText}>Disconnect</Text>
-        </AnimatedIconButton>
-      ) : (
-        <AnimatedIconButton style={styles.disconnectButton} onPress={() => router.replace('/connect')} pressScale={0.97}>
-          <Text style={styles.reconnectText}>Reconnect</Text>
-        </AnimatedIconButton>
-      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
@@ -73,7 +35,7 @@ export default function SettingsScreen() {
           <View style={styles.separator} />
           <View style={styles.row}>
             <Text style={styles.label}>Version</Text>
-            <Text style={styles.value}>0.1.0</Text>
+            <Text style={styles.value}>0.2.0</Text>
           </View>
         </View>
       </View>
@@ -141,22 +103,5 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: hex.surface1,
     marginLeft: 16,
-  },
-  disconnectButton: {
-    backgroundColor: hex.surface0,
-    borderRadius: 0,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  disconnectText: {
-    color: hex.red,
-    fontSize: 16,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  reconnectText: {
-    color: hex.accent,
-    fontSize: 16,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
 });

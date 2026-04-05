@@ -7,6 +7,7 @@ import type { StreamNode } from '../lib/types';
 
 interface StreamTreeItemProps {
   node: StreamNode;
+  isLast?: boolean;
   onKill?: (id: string) => void;
 }
 
@@ -63,8 +64,12 @@ export function showWorkstreamActions(
   }
 }
 
-export function StreamTreeItem({ node, onKill }: StreamTreeItemProps) {
+const GUTTER = 24;
+const INDENT = 20;
+
+export function StreamTreeItem({ node, isLast = false, onKill }: StreamTreeItemProps) {
   const statusColor = node.color ?? STATUS_COLORS[node.status] ?? hex.overlay0;
+  const gutterWidth = GUTTER + node.depth * INDENT;
 
   const handlePress = () => {
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -78,60 +83,76 @@ export function StreamTreeItem({ node, onKill }: StreamTreeItemProps) {
   };
 
   return (
-    <AnimatedIconButton
-      style={styles.item}
-      onPress={handlePress}
-      onLongPress={handleLongPress}
-      pressScale={0.97}
-    >
-      {/* Indent based on depth */}
-      {node.depth > 0 && <View style={{ width: node.depth * 20 }} />}
+    <View style={styles.row}>
+      {/* Connector gutter */}
+      <View style={{ width: gutterWidth }}>
+        {/* Vertical line — full height if not last, half if last */}
+        <View
+          style={[
+            styles.vLine,
+            {
+              left: GUTTER / 2 + node.depth * INDENT - INDENT / 2 - 0.5,
+              top: 0,
+              height: isLast ? '50%' : '100%',
+            },
+          ]}
+        />
+        {/* Horizontal branch */}
+        <View
+          style={[
+            styles.hLine,
+            {
+              left: GUTTER / 2 + node.depth * INDENT - INDENT / 2 - 0.5,
+              top: '50%',
+              width: gutterWidth - (GUTTER / 2 + node.depth * INDENT - INDENT / 2),
+            },
+          ]}
+        />
+      </View>
 
-      {/* Tree connector */}
-      {node.depth > 0 && (
-        <View style={styles.connector}>
-          <Text style={styles.connectorText}>
-            {node.depth > 0 ? '├─' : ''}
+      {/* Content */}
+      <AnimatedIconButton
+        style={styles.item}
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        pressScale={0.97}
+      >
+        <View style={[styles.dot, { backgroundColor: statusColor }]} />
+        <Text style={styles.name} numberOfLines={1}>
+          {node.name}
+        </Text>
+        <View style={styles.spacer} />
+        <View style={[styles.badge, { borderColor: statusColor + '40' }]}>
+          <Text style={[styles.badgeText, { color: statusColor }]}>
+            {AGENT_LABELS[node.agent] ?? node.agent}
           </Text>
         </View>
-      )}
-
-      {/* Status dot */}
-      <View style={[styles.dot, { backgroundColor: statusColor }]} />
-
-      {/* Name */}
-      <Text style={styles.name} numberOfLines={1}>
-        {node.name}
-      </Text>
-
-      {/* Spacer */}
-      <View style={styles.spacer} />
-
-      {/* Agent badge */}
-      <View style={[styles.badge, { borderColor: statusColor + '40' }]}>
-        <Text style={[styles.badgeText, { color: statusColor }]}>
-          {AGENT_LABELS[node.agent] ?? node.agent}
-        </Text>
-      </View>
-    </AnimatedIconButton>
+      </AnimatedIconButton>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  vLine: {
+    position: 'absolute',
+    width: 1,
+    backgroundColor: hex.surface2,
+  },
+  hLine: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: hex.surface2,
+  },
   item: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 4,
-    borderRadius: 0,
-  },
-  connector: {
-    marginRight: 4,
-  },
-  connectorText: {
-    color: hex.surface2,
-    fontSize: 12,
-    fontFamily: 'JetBrainsMono_400Regular',
+    paddingRight: 4,
   },
   dot: {
     width: 10,

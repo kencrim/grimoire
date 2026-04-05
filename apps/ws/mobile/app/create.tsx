@@ -9,9 +9,9 @@ import {
   Alert,
   KeyboardAvoidingView,
 } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useRelay } from './_layout';
+import { useDaemons } from './_layout';
 import { hex } from '../lib/theme';
 import { AnimatedIconButton } from '../components/AnimatedIconButton';
 
@@ -23,7 +23,13 @@ interface RepoEntry {
 }
 
 export default function CreateScreen() {
-  const { client } = useRelay();
+  const { daemonId } = useLocalSearchParams<{ daemonId: string }>();
+  const { getClient, daemons } = useDaemons();
+
+  const client = getClient(daemonId ?? '');
+  const daemonState = daemons.get(daemonId ?? '');
+  const daemonName = daemonState?.entry.name;
+
   const [name, setName] = useState('');
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>('');
@@ -71,6 +77,8 @@ export default function CreateScreen() {
 
   const canCreate = name.trim().length > 0 && !loading;
 
+  const title = daemonName ? `New on ${daemonName}` : 'New Workstream';
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -78,7 +86,7 @@ export default function CreateScreen() {
     >
       <Stack.Screen
         options={{
-          title: 'New Workstream',
+          title,
           presentation: 'modal',
           headerRight: () => (
             <AnimatedIconButton
