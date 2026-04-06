@@ -108,7 +108,7 @@ export function generateXtermHtml(): string {
 
   const term = new Terminal({
     fontSize: 16,
-    fontFamily: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
+    fontFamily: '"SF Mono", Menlo, Monaco, "Roboto Mono", monospace',
     scrollback: 1000,
     scrollSensitivity: 3,
     smoothScrollDuration: 100,
@@ -130,6 +130,17 @@ export function generateXtermHtml(): string {
     sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
   }, 100);
 
+  // Re-fit on any container resize (orientation change, keyboard show/hide,
+  // split-screen, etc.) and notify React Native of the new dimensions.
+  var resizeTimer = 0;
+  new ResizeObserver(function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() {
+      fitAddon.fit();
+      sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
+    }, 100);
+  }).observe(document.getElementById('terminal'));
+
   // Pause live updates when user scrolls up to read history.
   // Resume when they scroll back to the bottom.
   var userScrolledUp = false;
@@ -142,14 +153,23 @@ export function generateXtermHtml(): string {
   // Frame writes clear and rewrite the terminal, which fights with
   // touch gestures and causes jerky/interrupted scrolling.
   var userTouching = false;
-  document.addEventListener('touchstart', function() {
+  var wasPinching = false;
+  document.addEventListener('touchstart', function(e) {
     userTouching = true;
+    if (e.touches.length === 2) wasPinching = true;
   }, { passive: true });
   document.addEventListener('touchend', function() {
     userTouching = false;
+    // After a pinch gesture, re-fit to recalculate cols/rows for the new font size
+    if (wasPinching) {
+      wasPinching = false;
+      fitAddon.fit();
+      sendToRN({ type: 'ready', cols: term.cols, rows: term.rows });
+    }
   }, { passive: true });
   document.addEventListener('touchcancel', function() {
     userTouching = false;
+    wasPinching = false;
   }, { passive: true });
 
   // Font size state — phone uses its own natural column width (no auto-shrink
@@ -222,6 +242,9 @@ export function generateXtermHtml(): string {
     handleMessage(event.data);
   });
 
+  // Track last written content to skip redundant full redraws
+  var lastWrittenContent = '';
+
   function handleMessage(raw) {
     try {
       var msg = JSON.parse(raw);
@@ -231,11 +254,15 @@ export function generateXtermHtml(): string {
             if (msg.cols && msg.rows) {
               // Live update — skip if user is scrolled up or actively touching
               if (userScrolledUp || userTouching) break;
+              // Skip if content is identical to last write (avoids flicker)
+              if (msg.data === lastWrittenContent) break;
+              lastWrittenContent = msg.data;
               // Let xterm use the phone's natural column width — text from
               // wider desktop lines wraps instead of shrinking the font.
               term.write('\x1b[H\x1b[2J' + msg.data);
             } else {
               // History or incremental frame — always write
+              lastWrittenContent = '';
               term.write(msg.data);
             }
           }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner-native';
 import {
   View,
   Text,
@@ -6,7 +7,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
 } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -69,7 +69,7 @@ export default function CreateScreen() {
       });
       router.back();
     } catch (err) {
-      Alert.alert('Failed to create workstream', String(err));
+      toast.error('Failed to create workstream', { description: String(err) });
     } finally {
       setLoading(false);
     }

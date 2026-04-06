@@ -16,6 +16,16 @@ export interface NativeTerminalHandle {
   clear: () => void;
 }
 
+export interface NativeTerminalViewProps {
+  /** Called when the view measures its dimensions and calculates cols/rows */
+  onDimensions?: (cols: number, rows: number) => void;
+}
+
+// JetBrains Mono at 13px: each character is ~7.8px wide
+const CHAR_WIDTH = 7.8;
+const LINE_HEIGHT = 18;
+const PAD_H = 6 * 2; // paddingHorizontal from scrollContent
+
 /**
  * Merge a new frame into the existing line buffer based on the scroll indicator.
  */
@@ -76,34 +86,61 @@ function incrementalParse(
   return reused.concat(changedParsed);
 }
 
-export const NativeTerminalView = forwardRef<NativeTerminalHandle>(
-  function NativeTerminalView(_props, ref) {
+export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTerminalViewProps>(
+  function NativeTerminalView({ onDimensions }, ref) {
     const listRef = useRef<FlashList<ParsedLine>>(null);
     const bufferRef = useRef<string[]>([]);
     const prevBufferRef = useRef<string[]>([]);
     const userScrolledUpRef = useRef(false);
+    const rafIdRef = useRef<number>(0);
     const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
+    const reportedDimsRef = useRef<string>('');
+
+    const handleLayout = useCallback((event: { nativeEvent: { layout: { width: number; height: number } } }) => {
+      const { width, height } = event.nativeEvent.layout;
+      const cols = Math.floor((width - PAD_H) / CHAR_WIDTH);
+      const rows = Math.floor(height / LINE_HEIGHT);
+      const key = `${cols}x${rows}`;
+      if (cols > 0 && rows > 0 && key !== reportedDimsRef.current) {
+        reportedDimsRef.current = key;
+        onDimensions?.(cols, rows);
+      }
+    }, [onDimensions]);
 
     useImperativeHandle(ref, () => ({
       pushFrame(frame: PaneFrame) {
+        // Always merge into buffer immediately so no frames are lost
         const prev = bufferRef.current;
         const next = mergeFrame(prev, frame);
         bufferRef.current = next;
-        if (!userScrolledUpRef.current) {
-          const prevParsedSnapshot = prevBufferRef.current;
-          prevBufferRef.current = next;
-          setParsedLines(prevParsed =>
-            incrementalParse(prevParsedSnapshot, next, prevParsed),
-          );
-          // Auto-scroll after React processes the update
-          requestAnimationFrame(() => {
+
+        // Throttle rendering to one per animation frame to prevent jank
+        // during burst output (multiple frames between paints)
+        if (!rafIdRef.current) {
+          rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = 0;
             if (!userScrolledUpRef.current) {
-              listRef.current?.scrollToEnd({ animated: false });
+              const currentBuffer = bufferRef.current;
+              const prevParsedSnapshot = prevBufferRef.current;
+              prevBufferRef.current = currentBuffer;
+              setParsedLines(prevParsed =>
+                incrementalParse(prevParsedSnapshot, currentBuffer, prevParsed),
+              );
+              // Auto-scroll after React processes the update
+              requestAnimationFrame(() => {
+                if (!userScrolledUpRef.current) {
+                  listRef.current?.scrollToEnd({ animated: false });
+                }
+              });
             }
           });
         }
       },
       clear() {
+        if (rafIdRef.current) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = 0;
+        }
         bufferRef.current = [];
         prevBufferRef.current = [];
         setParsedLines([]);
@@ -142,7 +179,7 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle>(
     );
 
     return (
-      <View style={styles.container}>
+      <View style={styles.container} onLayout={handleLayout}>
         <FlashList
           ref={listRef}
           data={parsedLines}
