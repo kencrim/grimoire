@@ -7,6 +7,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import { toast } from 'sonner-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
@@ -31,7 +32,6 @@ export default function ManageScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const [allDiscovered, setAllDiscovered] = useState<DiscoveredDaemon[]>([]);
   const [scanning, setScanning] = useState(false);
 
@@ -77,7 +77,6 @@ export default function ManageScreen() {
 
   const handleDiscoveredConnect = async (daemon: DiscoveredDaemon) => {
     setLoading(true);
-    setError('');
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     if (daemon.type === 'tailscale') {
@@ -93,18 +92,17 @@ export default function ManageScreen() {
     const ok = await connectDaemon(entry.id);
     setLoading(false);
     if (!ok) {
-      setError(`Could not connect to ${daemon.host}`);
+      toast.error('Connection failed', { description: `Could not connect to ${daemon.host}` });
     }
   };
 
   const handleQrScanned = async (data: string) => {
     setShowScanner(false);
     setLoading(true);
-    setError('');
 
     const parsed = parseHexUri(data);
     if (!parsed) {
-      setError('Invalid QR code. Expected hex:// URI.');
+      toast.error('Invalid QR code', { description: 'Expected hex:// URI.' });
       setLoading(false);
       return;
     }
@@ -112,7 +110,7 @@ export default function ManageScreen() {
     const ok = await connectFromUri(data);
     setLoading(false);
     if (!ok) {
-      setError('Could not connect to daemon. Is it running?');
+      toast.error('Connection failed', { description: 'Could not connect to daemon. Is it running?' });
     }
   };
 
@@ -133,11 +131,10 @@ export default function ManageScreen() {
       disconnectDaemon(daemonId);
     } else {
       setLoading(true);
-      setError('');
       const ok = await connectDaemon(daemonId);
       setLoading(false);
       if (!ok) {
-        setError('Could not reconnect. Is the daemon running?');
+        toast.error('Connection failed', { description: 'Could not reconnect. Is the daemon running?' });
       }
     }
   };
@@ -222,8 +219,6 @@ export default function ManageScreen() {
           })}
         </View>
       )}
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {/* Discovered daemons (filtered to exclude already-saved) */}
       {discovered.length > 0 && (
@@ -450,12 +445,6 @@ const styles = StyleSheet.create({
   linkText: {
     color: hex.accent,
     fontSize: 14,
-  },
-  error: {
-    color: hex.red,
-    fontSize: 13,
-    marginBottom: 12,
-    textAlign: 'center',
   },
   cameraContainer: {
     width: 280,

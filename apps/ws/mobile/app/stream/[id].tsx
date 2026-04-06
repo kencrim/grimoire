@@ -11,6 +11,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
 } from 'react-native';
+import { toast } from 'sonner-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -25,7 +26,8 @@ import { useDaemons } from '../_layout';
 import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { SkillsSheet } from '../../components/SkillsSheet';
 import { NativeTerminalView, type NativeTerminalHandle } from '../../components/NativeTerminalView';
-import type { Skill } from '../../lib/types';
+import { ExtraKeysBar } from '../../components/ExtraKeysBar';
+import type { Skill, PaneInputMsg } from '../../lib/types';
 import { hex } from '../../lib/theme';
 
 type PaneTab = 'agent' | 'terminal';
@@ -98,7 +100,7 @@ export default function StreamScreen() {
       return;
     }
     if (!micPermitted.current) {
-      Alert.alert('Permission required', 'Microphone and speech recognition access is needed.');
+      toast.warning('Microphone permission required', { description: 'Enable mic access in Settings to use voice input.' });
       return;
     }
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -138,11 +140,22 @@ export default function StreamScreen() {
     terminalRef.current?.clear();
     client.connectPane(agentRef, activeTab);
 
+    // Re-send dimensions after (re)connecting so the pane resizes to fit the phone
+    const dims = termDimsRef.current;
+    let dimsTimer: ReturnType<typeof setTimeout> | undefined;
+    if (dims) {
+      // Small delay to let the WebSocket open
+      dimsTimer = setTimeout(() => {
+        client.sendPaneInput({ type: 'resize', data: '', cols: dims.cols, rows: dims.rows });
+      }, 300);
+    }
+
     const unsub = client.onPane((frame) => {
       terminalRef.current?.pushFrame(frame);
     });
 
     return () => {
+      if (dimsTimer) clearTimeout(dimsTimer);
       unsub();
       client.disconnectPane();
     };
@@ -197,13 +210,24 @@ export default function StreamScreen() {
           client.sendPaneInput({ type: 'input_submit', data: text });
         }
       } catch (err) {
-        Alert.alert('Upload failed', String(err));
+        toast.error('Upload failed', { description: String(err) });
       }
       setUploading(false);
     } else if (text) {
       client.sendPaneInput({ type: 'input_submit', data: text });
     }
   }, [inputText, pendingImages, client]);
+
+  const handleExtraKey = useCallback((input: PaneInputMsg) => {
+    client?.sendPaneInput(input);
+  }, [client]);
+
+  // Send resize to server when NativeTerminalView measures its layout
+  const termDimsRef = useRef<{ cols: number; rows: number } | null>(null);
+  const handleTerminalDimensions = useCallback((cols: number, rows: number) => {
+    termDimsRef.current = { cols, rows };
+    client?.sendPaneInput({ type: 'resize', data: '', cols, rows });
+  }, [client]);
 
   const switchTab = (tab: PaneTab) => {
     if (tab === activeTab) return;
@@ -242,7 +266,7 @@ export default function StreamScreen() {
 
       {/* Terminal */}
       <View style={styles.terminal}>
-        <NativeTerminalView ref={terminalRef} />
+        <NativeTerminalView ref={terminalRef} onDimensions={handleTerminalDimensions} />
       </View>
 
       {/* Pane tab switcher */}
@@ -264,6 +288,9 @@ export default function StreamScreen() {
           </Text>
         </Pressable>
       </View>
+
+      {/* Extra keys bar for terminal tab */}
+      {activeTab === 'terminal' && <ExtraKeysBar onKey={handleExtraKey} />}
 
       <ComposeBar
         inputText={inputText}

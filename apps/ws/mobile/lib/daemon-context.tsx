@@ -1,10 +1,36 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { randomUUID } from 'expo-crypto';
+import { toast } from 'sonner-native';
 import { RelayClient, parseHexUri, checkDaemonHealth } from './relay-client';
 import { mergeAgentList } from './agents';
 import { getSavedTailscaleConfig, saveTailscaleConfig } from './discovery';
 import type { AgentStatus, ConnectionConfig, DaemonEntry, QualifiedAgent, StreamEvent } from './types';
+
+// --- Toast helpers ---
+
+function agentDisplayName(id: string): string {
+  return id.includes('/') ? id.split('/').pop()! : id;
+}
+
+function notifyStreamEvent(event: StreamEvent): void {
+  if (event.type === 'status_changed' && !Array.isArray(event.data)) {
+    const agent = event.data as AgentStatus;
+    if (agent.status === 'idle') {
+      toast.success(`${agentDisplayName(agent.id)} is ready`, {
+        description: 'Waiting for input',
+      });
+    }
+  } else if (event.type === 'agent_spawned' && !Array.isArray(event.data)) {
+    const agent = event.data as AgentStatus;
+    toast(`${agentDisplayName(agent.id)} spawned`, {
+      description: agent.agent ?? 'workstream',
+    });
+  } else if (event.type === 'agent_killed' && !Array.isArray(event.data)) {
+    const agent = event.data as AgentStatus;
+    toast(`${agentDisplayName(agent.id)} ended`);
+  }
+}
 
 // --- DaemonState (lives here to avoid circular import with RelayClient) ---
 
@@ -110,6 +136,8 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
 
   // Mutable ref mirrors state for use in WebSocket callbacks (avoids stale closures)
   const mapRef = useRef<Map<string, DaemonState>>(new Map());
+  // Suppress toasts during initial restore so we don't spam on app launch
+  const initialLoadDoneRef = useRef(false);
 
   // Keep ref in sync
   useEffect(() => {
@@ -159,10 +187,20 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
 
   const wireClient = useCallback((daemonId: string, client: RelayClient) => {
     client.onStatus((isConnected) => {
-      updateDaemon(daemonId, s => ({ ...s, connected: isConnected }));
+      updateDaemon(daemonId, s => {
+        const name = s.entry.name;
+        // Only toast on transitions, not initial state
+        if (s.connected && !isConnected) {
+          toast.error(`Disconnected from ${name}`);
+        } else if (!s.connected && isConnected) {
+          toast.success(`Connected to ${name}`);
+        }
+        return { ...s, connected: isConnected };
+      });
     });
 
     client.onStreams((event: StreamEvent) => {
+      notifyStreamEvent(event);
       updateDaemon(daemonId, s => {
         if (event.type === 'snapshot' && Array.isArray(event.data)) {
           return { ...s, agents: mergeAgentList(s.agents, event.data) };
@@ -399,12 +437,24 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
             setDaemonMap(prev => {
               const next = new Map(prev);
               const s = next.get(entry.id);
-              if (s) next.set(entry.id, { ...s, connected: isConnected });
+              if (!s) return prev;
+              // Toast on disconnect after initial load
+              if (initialLoadDoneRef.current) {
+                if (s.connected && !isConnected) {
+                  toast.error(`Disconnected from ${entry.name}`);
+                } else if (!s.connected && isConnected) {
+                  toast.success(`Connected to ${entry.name}`);
+                }
+              }
+              next.set(entry.id, { ...s, connected: isConnected });
               return next;
             });
           });
 
           client.onStreams((event: StreamEvent) => {
+            if (initialLoadDoneRef.current) {
+              notifyStreamEvent(event);
+            }
             setDaemonMap(prev => {
               const next = new Map(prev);
               const s = next.get(entry.id);
@@ -434,6 +484,7 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
         }),
       );
 
+      initialLoadDoneRef.current = true;
       setReady(true);
     })();
 

@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { Toaster } from 'sonner-native';
 import { useFonts } from 'expo-font';
 import {
   SpaceGrotesk_400Regular,
@@ -60,6 +61,31 @@ export default function RootLayout() {
             />
           </Stack>
         </DaemonManagerProvider>
+        <Toaster
+          position="top-center"
+          duration={4000}
+          visibleToasts={3}
+          swipeToDismissDirection="up"
+          gap={8}
+          theme="dark"
+          toastOptions={{
+            style: {
+              backgroundColor: hex.surface0,
+              borderColor: hex.surface2,
+              borderWidth: 1,
+            },
+            titleStyle: {
+              fontFamily: 'SpaceGrotesk_600SemiBold',
+              color: hex.text,
+              fontSize: 14,
+            },
+            descriptionStyle: {
+              fontFamily: 'SpaceGrotesk_400Regular',
+              color: hex.subtext1,
+              fontSize: 13,
+            },
+          }}
+        />
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
   );

@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -305,6 +306,14 @@ func (ps *PaneStreamer) HandleInput(input PaneInputMsg) error {
 
 	case "resize":
 		log.Printf("[pane-stream] phone resize: %dx%d", input.Cols, input.Rows)
+		if input.Cols > 0 && input.Rows > 0 {
+			cmd := runOnHost(ps.host, "tmux", "resize-pane", "-t", ps.target,
+				"-x", fmt.Sprintf("%d", input.Cols), "-y", fmt.Sprintf("%d", input.Rows))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("[pane-stream] resize-pane error: %s", string(out))
+				return err
+			}
+		}
 
 	default:
 		log.Printf("[pane-stream] unknown input type: %s", input.Type)
