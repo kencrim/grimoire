@@ -25,6 +25,7 @@ import {
 import { useDaemons } from '../_layout';
 import { AnimatedIconButton } from '../../components/AnimatedIconButton';
 import { SkillsSheet } from '../../components/SkillsSheet';
+import { TerminalControls } from '../../components/TerminalControls';
 import { NativeTerminalView, type NativeTerminalHandle } from '../../components/NativeTerminalView';
 import { ExtraKeysBar } from '../../components/ExtraKeysBar';
 import type { Skill, PaneInputMsg } from '../../lib/types';
@@ -55,6 +56,7 @@ export default function StreamScreen() {
   const [uploading, setUploading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [showControls, setShowControls] = useState(false);
   const skillsRef = useRef<BottomSheetModal>(null);
 
   // Fetch available skills on mount
@@ -62,6 +64,15 @@ export default function StreamScreen() {
     if (!client || !agentRef) return;
     client.getSkills(agentRef).then(setSkills).catch(() => {});
   }, [client, agentRef]);
+
+  const handleSpecialKey = useCallback((key: string) => {
+    client?.sendPaneInput({ type: 'special', data: key });
+  }, [client]);
+
+  const toggleControls = useCallback(() => {
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowControls((prev) => !prev);
+  }, []);
 
   const handleSkills = useCallback(() => {
     if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -305,6 +316,9 @@ export default function StreamScreen() {
         hasContent={hasContent}
         uploading={uploading}
         bottomInset={insets.bottom}
+        showControls={showControls}
+        toggleControls={toggleControls}
+        onSpecialKey={handleSpecialKey}
       />
       <SkillsSheet ref={skillsRef} skills={skills} onSelect={handleSkillSelect} />
     </KeyboardAvoidingView>
@@ -324,6 +338,9 @@ interface ComposeBarProps {
   hasContent: boolean;
   uploading: boolean;
   bottomInset: number;
+  showControls: boolean;
+  toggleControls: () => void;
+  onSpecialKey: (key: string) => void;
 }
 
 const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
@@ -331,10 +348,13 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
     inputText, setInputText, pendingImages, removeImage,
     handleImagePick, handleSkills, handleMic, recognizing,
     handleSend, hasContent, uploading, bottomInset,
+    showControls, toggleControls, onSpecialKey,
   } = props;
 
   return (
     <View style={styles.compose}>
+        {showControls && <TerminalControls onKey={onSpecialKey} />}
+
         {pendingImages.length > 0 && (
           <ScrollView
             horizontal
@@ -379,6 +399,13 @@ const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
             </AnimatedIconButton>
             <AnimatedIconButton onPress={handleSkills} hitSlop={8} style={styles.skillsButton}>
               <SymbolView name="sparkles" size={18} tintColor={hex.overlay1} />
+            </AnimatedIconButton>
+            <AnimatedIconButton
+              onPress={toggleControls}
+              hitSlop={8}
+              style={[styles.controlsButton, showControls && styles.controlsButtonActive]}
+            >
+              <SymbolView name="keyboard" size={18} tintColor={showControls ? hex.accent : hex.overlay1} />
             </AnimatedIconButton>
           </View>
           <View style={styles.actionsRight}>
@@ -529,6 +556,20 @@ const styles = StyleSheet.create({
     borderColor: hex.surface2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  controlsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: hex.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlsButtonActive: {
+    borderColor: hex.accent,
+    backgroundColor: 'rgba(255, 140, 0, 0.15)',
   },
   actionsRight: {
     flexDirection: 'row',
