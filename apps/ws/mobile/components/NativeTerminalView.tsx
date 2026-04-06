@@ -92,6 +92,7 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTermina
     const bufferRef = useRef<string[]>([]);
     const prevBufferRef = useRef<string[]>([]);
     const userScrolledUpRef = useRef(false);
+    const userDraggingRef = useRef(false);
     const rafIdRef = useRef<number>(0);
     const [parsedLines, setParsedLines] = useState<ParsedLine[]>([]);
     const reportedDimsRef = useRef<string>('');
@@ -119,14 +120,17 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTermina
         if (!rafIdRef.current) {
           rafIdRef.current = requestAnimationFrame(() => {
             rafIdRef.current = 0;
+
+            // Always update parsed lines so content stays visible when scrolled up
+            const currentBuffer = bufferRef.current;
+            const prevParsedSnapshot = prevBufferRef.current;
+            prevBufferRef.current = currentBuffer;
+            setParsedLines(prevParsed =>
+              incrementalParse(prevParsedSnapshot, currentBuffer, prevParsed),
+            );
+
+            // Only auto-scroll if user hasn't scrolled up
             if (!userScrolledUpRef.current) {
-              const currentBuffer = bufferRef.current;
-              const prevParsedSnapshot = prevBufferRef.current;
-              prevBufferRef.current = currentBuffer;
-              setParsedLines(prevParsed =>
-                incrementalParse(prevParsedSnapshot, currentBuffer, prevParsed),
-              );
-              // Auto-scroll after React processes the update
               requestAnimationFrame(() => {
                 if (!userScrolledUpRef.current) {
                   listRef.current?.scrollToEnd({ animated: false });
@@ -147,14 +151,12 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTermina
       },
     }), []);
 
-    const flushBuffer = useCallback(() => {
-      const content = bufferRef.current.join('\n');
-      const parsed = parseTerminalContent(content);
-      prevBufferRef.current = bufferRef.current;
-      setParsedLines(parsed);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: false });
-      });
+    const handleScrollBeginDrag = useCallback(() => {
+      userDraggingRef.current = true;
+    }, []);
+
+    const handleScrollEndDrag = useCallback(() => {
+      userDraggingRef.current = false;
     }, []);
 
     const handleScroll = useCallback(
@@ -162,15 +164,23 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTermina
         const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
         const distanceFromBottom =
           contentSize.height - contentOffset.y - layoutMeasurement.height;
-        const wasScrolledUp = userScrolledUpRef.current;
-        const isScrolledUp = distanceFromBottom > 40;
-        userScrolledUpRef.current = isScrolledUp;
 
-        if (wasScrolledUp && !isScrolledUp) {
-          flushBuffer();
+        // Only mark as scrolled-up when the user is actively dragging —
+        // programmatic scrollToEnd can briefly report a stale position
+        // before FlashList finishes layout, causing a false positive.
+        if (userDraggingRef.current) {
+          userScrolledUpRef.current = distanceFromBottom > 40;
+        }
+
+        // When we reach the bottom (by drag or momentum), resume auto-scroll
+        if (distanceFromBottom <= 40 && userScrolledUpRef.current) {
+          userScrolledUpRef.current = false;
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: false });
+          });
         }
       },
-      [flushBuffer],
+      [],
     );
 
     const renderItem = useCallback(
@@ -185,6 +195,8 @@ export const NativeTerminalView = forwardRef<NativeTerminalHandle, NativeTermina
           data={parsedLines}
           renderItem={renderItem}
           estimatedItemSize={18}
+          onScrollBeginDrag={handleScrollBeginDrag}
+          onScrollEndDrag={handleScrollEndDrag}
           onScroll={handleScroll}
           scrollEventThrottle={32}
           showsVerticalScrollIndicator
