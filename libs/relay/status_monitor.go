@@ -29,6 +29,7 @@ type StatusMonitor struct {
 type agentPollState struct {
 	lastContent  string
 	stableCount  int
+	activeCount  int  // consecutive polls with changing content
 	reportedIdle bool
 }
 
@@ -90,22 +91,24 @@ func (sm *StatusMonitor) pollAll() {
 	// Snapshot the current agents under daemon lock
 	sm.daemon.mu.RLock()
 	type agentSnapshot struct {
-		id      string
-		agent   string
-		session string
-		paneID  string
-		host    string
-		status  string
+		id          string
+		agent       string
+		session     string
+		paneID      string
+		host        string
+		status      string
+		hooksActive bool
 	}
 	agents := make([]agentSnapshot, 0, len(sm.daemon.agents))
 	for _, a := range sm.daemon.agents {
 		agents = append(agents, agentSnapshot{
-			id:      a.ID,
-			agent:   a.Agent,
-			session: a.Session,
-			paneID:  a.PaneID,
-			host:    a.Host,
-			status:  a.Status,
+			id:          a.ID,
+			agent:       a.Agent,
+			session:     a.Session,
+			paneID:      a.PaneID,
+			host:        a.Host,
+			status:      a.Status,
+			hooksActive: a.HooksActive,
 		})
 	}
 	sm.daemon.mu.RUnlock()
@@ -125,7 +128,7 @@ func (sm *StatusMonitor) pollAll() {
 	}
 
 	for _, agent := range agents {
-		if agent.status == "exited" {
+		if agent.status == "exited" || agent.hooksActive {
 			continue
 		}
 
@@ -144,12 +147,16 @@ func (sm *StatusMonitor) pollAll() {
 
 		if stripped == state.lastContent {
 			state.stableCount++
+			state.activeCount = 0
 		} else {
 			state.stableCount = 0
 			state.lastContent = stripped
+			state.activeCount++
 
-			// Content is changing — if we previously reported idle, go back to alive
-			if state.reportedIdle {
+			// Only transition back to alive after sustained activity (2+ consecutive
+			// polls with changing content). A single change from a resize or scroll
+			// won't trigger a false alive→idle cycle and spurious notifications.
+			if state.reportedIdle && state.activeCount >= 2 {
 				state.reportedIdle = false
 				sm.transitionAgent(agent.id, "alive")
 			}

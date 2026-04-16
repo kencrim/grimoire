@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/kencrim/grimoire/libs/relay"
@@ -67,6 +68,9 @@ var agentRunCmd = &cobra.Command{
 			agentCmd = exec.Command("amp", ampArgs...)
 
 		case "claude":
+			if err := writeClaudeHooks(agentID, socketPath); err != nil {
+				log.Printf("[agent-run] warning: could not write claude hooks: %v", err)
+			}
 			claudeArgs := []string{"--dangerously-skip-permissions"}
 			if task != "" {
 				claudeArgs = append(claudeArgs, "-p", task)
@@ -103,6 +107,57 @@ var agentRunCmd = &cobra.Command{
 
 		return agentCmd.Wait()
 	},
+}
+
+// writeClaudeHooks writes .claude/settings.local.json with Stop and
+// UserPromptSubmit hooks that report status transitions to the daemon.
+func writeClaudeHooks(agentID, socketPath string) error {
+	dir := filepath.Join(".", ".claude")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	bin := wsBin()
+	idleCmd := fmt.Sprintf("%s agent-event --id %s --socket %s --status idle", bin, agentID, socketPath)
+	aliveCmd := fmt.Sprintf("%s agent-event --id %s --socket %s --status alive", bin, agentID, socketPath)
+
+	// Read existing settings to preserve non-hook fields
+	settingsPath := filepath.Join(dir, "settings.local.json")
+	settings := make(map[string]interface{})
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		json.Unmarshal(data, &settings)
+	}
+
+	settings["hooks"] = map[string]interface{}{
+		"Stop": []interface{}{
+			map[string]interface{}{
+				"hooks": []interface{}{
+					map[string]interface{}{
+						"type":    "command",
+						"command": idleCmd,
+						"timeout": 5,
+					},
+				},
+			},
+		},
+		"UserPromptSubmit": []interface{}{
+			map[string]interface{}{
+				"hooks": []interface{}{
+					map[string]interface{}{
+						"type":    "command",
+						"command": aliveCmd,
+						"timeout": 5,
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, data, 0o644)
 }
 
 func init() {

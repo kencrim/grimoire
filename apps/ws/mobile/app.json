@@ -14,17 +14,24 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Hex needs camera access to scan QR codes for daemon pairing.",
         "NSLocalNetworkUsageDescription": "Hex uses local network to discover relay daemons.",
-        "NSBonjourServices": ["_hex._tcp."],
+        "NSBonjourServices": [
+          "_hex._tcp."
+        ],
         "NSMicrophoneUsageDescription": "Hex uses the microphone for voice-to-text input.",
         "NSSpeechRecognitionUsageDescription": "Hex uses speech recognition to transcribe voice input."
-      }
+      },
+      "appleTeamId": "AA56HRK7LB"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1e1e2e"
       },
-      "package": "com.clockwork.hex"
+      "package": "com.clockwork.hex",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -47,7 +54,20 @@
           "microphonePermission": "Hex uses the microphone for voice-to-text input.",
           "speechRecognitionPermission": "Hex uses speech recognition to transcribe voice input."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": []
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "406ce5c5-a435-4cd8-8db6-1cea79c52c4d"
+      }
+    },
+    "owner": "kencrim"
   }
 }
