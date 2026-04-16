@@ -4,6 +4,7 @@ import { randomUUID } from 'expo-crypto';
 import { toast } from 'sonner-native';
 import { RelayClient, parseHexUri, checkDaemonHealth } from './relay-client';
 import { mergeAgentList } from './agents';
+import { registerPushToken } from './notifications';
 import { getSavedTailscaleConfig, saveTailscaleConfig } from './discovery';
 import type { AgentStatus, ConnectionConfig, DaemonEntry, QualifiedAgent, StreamEvent } from './types';
 
@@ -187,16 +188,15 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
 
   const wireClient = useCallback((daemonId: string, client: RelayClient) => {
     client.onStatus((isConnected) => {
-      updateDaemon(daemonId, s => {
-        const name = s.entry.name;
-        // Only toast on transitions, not initial state
-        if (s.connected && !isConnected) {
-          toast.error(`Disconnected from ${name}`);
-        } else if (!s.connected && isConnected) {
-          toast.success(`Connected to ${name}`);
+      const state = mapRef.current.get(daemonId);
+      if (state) {
+        if (state.connected && !isConnected) {
+          toast.error(`Disconnected from ${state.entry.name}`);
+        } else if (!state.connected && isConnected) {
+          toast.success(`Connected to ${state.entry.name}`);
         }
-        return { ...s, connected: isConnected };
-      });
+      }
+      updateDaemon(daemonId, s => ({ ...s, connected: isConnected }));
     });
 
     client.onStreams((event: StreamEvent) => {
@@ -308,6 +308,9 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
     const client = new RelayClient(state.entry.config);
     updateDaemon(daemonId, s => ({ ...s, client }));
     wireClient(daemonId, client);
+
+    // Register push token so daemon can send notifications when app is closed
+    registerPushToken(state.entry.config).catch((e) => console.error('[push] registration failed:', e));
 
     return true;
   }, [updateDaemon, wireClient]);
@@ -434,22 +437,27 @@ export function DaemonManagerProvider({ children }: { children: React.ReactNode 
 
           // Wire callbacks
           client.onStatus((isConnected) => {
-            setDaemonMap(prev => {
-              const next = new Map(prev);
-              const s = next.get(entry.id);
-              if (!s) return prev;
-              // Toast on disconnect after initial load
-              if (initialLoadDoneRef.current) {
+            if (initialLoadDoneRef.current) {
+              const s = mapRef.current.get(entry.id);
+              if (s) {
                 if (s.connected && !isConnected) {
                   toast.error(`Disconnected from ${entry.name}`);
                 } else if (!s.connected && isConnected) {
                   toast.success(`Connected to ${entry.name}`);
                 }
               }
+            }
+            setDaemonMap(prev => {
+              const next = new Map(prev);
+              const s = next.get(entry.id);
+              if (!s) return prev;
               next.set(entry.id, { ...s, connected: isConnected });
               return next;
             });
           });
+
+          // Register push token for remote notifications
+          registerPushToken(entry.config).catch((e) => console.error('[push] restore registration failed:', e));
 
           client.onStreams((event: StreamEvent) => {
             if (initialLoadDoneRef.current) {

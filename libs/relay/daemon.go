@@ -25,6 +25,7 @@ type AgentHandle struct {
 	PaneID       string // tmux pane ID (e.g. %5) — used for targeting split panes
 	Host         string // SSH host for remote agents (empty = local)
 	Status       string // alive, idle, exited
+	HooksActive  bool   // true once agent reports status via hooks (skip tmux polling)
 }
 
 // Daemon manages the agent registry and routes messages.
@@ -291,6 +292,12 @@ type RegisterPayload struct {
 	WorkDir  string `json:"work_dir,omitempty"`
 }
 
+// TransitionPayload is sent by Claude Code hooks to report status changes.
+type TransitionPayload struct {
+	AgentID string `json:"agent_id"`
+	Status  string `json:"status"` // idle, alive
+}
+
 // HandleAction processes a single envelope and returns the response.
 // Used by both Unix socket and WebSocket handlers.
 func (d *Daemon) HandleAction(env Envelope) (any, error) {
@@ -390,6 +397,34 @@ func (d *Daemon) HandleAction(env Envelope) (any, error) {
 		log.Printf("[daemon] registered agent %q (parent: %q, pane: %q)", reg.AgentID, reg.ParentID, reg.PaneID)
 		d.emitEvent(StreamEvent{Type: "agent_spawned", Data: status})
 		return map[string]string{"status": "registered"}, nil
+
+	case "transition":
+		var tp TransitionPayload
+		if err := json.Unmarshal(env.Payload, &tp); err != nil {
+			return nil, err
+		}
+		d.mu.Lock()
+		agent, ok := d.agents[tp.AgentID]
+		if !ok {
+			d.mu.Unlock()
+			return nil, fmt.Errorf("agent %q not found", tp.AgentID)
+		}
+		oldStatus := agent.Status
+		if oldStatus == tp.Status {
+			d.mu.Unlock()
+			return map[string]string{"status": "unchanged"}, nil
+		}
+		agent.Status = tp.Status
+		agent.HooksActive = true
+		status := d.enrichedStatus(agent)
+		d.mu.Unlock()
+
+		log.Printf("[daemon] agent %q: %s -> %s (hook)", tp.AgentID, oldStatus, tp.Status)
+		d.emitEvent(StreamEvent{
+			Type: "status_changed",
+			Data: status,
+		})
+		return map[string]string{"status": "transitioned"}, nil
 
 	case "unregister":
 		var reg RegisterPayload

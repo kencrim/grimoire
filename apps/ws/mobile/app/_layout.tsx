@@ -1,4 +1,5 @@
-import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -13,10 +14,34 @@ import {
   JetBrainsMono_400Regular,
   JetBrainsMono_500Medium,
 } from '@expo-google-fonts/jetbrains-mono';
-import { DaemonManagerProvider } from '../lib/daemon-context';
+import { DaemonManagerProvider, useDaemons } from '../lib/daemon-context';
+import { requestNotificationPermissions, addNotificationResponseListener } from '../lib/notifications';
 import { hex } from '../lib/theme';
 
 export { useDaemons } from '../lib/daemon-context';
+
+/** Listens for notification taps and navigates to the agent's stream screen. */
+function NotificationNavigator() {
+  const { allAgents } = useDaemons();
+
+  useEffect(() => {
+    // Request permissions early so the token is ready for daemon connections
+    requestNotificationPermissions()
+      .then((granted) => console.log('[notifications] permission granted:', granted))
+      .catch((err) => console.error('[notifications] permission error:', err));
+
+    const sub = addNotificationResponseListener((agentId) => {
+      // Find the qualified ID (daemonId::agentId) for this agent
+      const match = allAgents.find(a => a.id === agentId);
+      if (match) {
+        router.push(`/stream/${match.qualifiedId}`);
+      }
+    });
+    return () => sub.remove();
+  }, [allAgents]);
+
+  return null;
+}
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -33,6 +58,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
         <DaemonManagerProvider>
+          <NotificationNavigator />
           <StatusBar style="light" />
           <Stack
             initialRouteName="(tabs)"

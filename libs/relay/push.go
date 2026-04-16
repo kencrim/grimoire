@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // PushService manages Expo push tokens and sends push notifications
@@ -17,9 +18,10 @@ import (
 // push API, which routes through APNs/FCM to reach the device even
 // when the app is closed.
 type PushService struct {
-	mu        sync.RWMutex
-	tokens    []string
-	storePath string
+	mu           sync.RWMutex
+	tokens       []string
+	storePath    string
+	lastNotified map[string]time.Time // per-agent dedup
 }
 
 // expoPushMessage is the payload sent to Expo's push API.
@@ -37,7 +39,7 @@ const expoPushURL = "https://exp.host/--/api/v2/push/send"
 func NewPushService() *PushService {
 	home, _ := os.UserHomeDir()
 	storePath := filepath.Join(home, ".config", "ws", "push-tokens.json")
-	ps := &PushService{storePath: storePath}
+	ps := &PushService{storePath: storePath, lastNotified: make(map[string]time.Time)}
 	ps.load()
 	return ps
 }
@@ -79,11 +81,18 @@ func (ps *PushService) RemoveToken(token string) {
 
 // NotifyIdle sends a push notification to all registered devices
 // that an agent has gone idle.
+const notifyCooldown = 60 * time.Second
+
 func (ps *PushService) NotifyIdle(agent AgentStatus) {
-	ps.mu.RLock()
+	ps.mu.Lock()
+	if last, ok := ps.lastNotified[agent.ID]; ok && time.Since(last) < notifyCooldown {
+		ps.mu.Unlock()
+		return
+	}
+	ps.lastNotified[agent.ID] = time.Now()
 	tokens := make([]string, len(ps.tokens))
 	copy(tokens, ps.tokens)
-	ps.mu.RUnlock()
+	ps.mu.Unlock()
 
 	if len(tokens) == 0 {
 		return
