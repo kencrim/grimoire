@@ -54,6 +54,18 @@ var killCmd = &cobra.Command{
 			return err
 		}
 
+		// Unfocus any removed workstream first, so we restore the main repo and
+		// re-attach the worktree before tearing it down.
+		if focusReg, ferr := core.LoadFocusRegistry(core.DefaultFocusPath()); ferr == nil {
+			for _, node := range removed {
+				if f, ok := focusReg.ForWorkstream(node.ID); ok {
+					if uerr := unfocusWorkstream(focusReg, f); uerr != nil {
+						fmt.Printf("  Warning: could not unfocus %s before kill: %v\n", node.ID, uerr)
+					}
+				}
+			}
+		}
+
 		for _, node := range removed {
 			// Kill this workstream's tmux session
 			if node.Session != "" {

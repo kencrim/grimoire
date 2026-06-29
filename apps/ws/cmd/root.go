@@ -23,6 +23,8 @@ with agents running inside it.
   ws add auth/oauth --agent amp    Nest under an existing workstream
   ws list                          Show the workstream tree
   ws switch auth                   Switch to a workstream's tmux session
+  ws focus auth                    Borrow a workstream's branch into its main repo
+  ws unfocus                       Restore branches after a focus
   ws kill auth                     Tear down a workstream and its children
   ws status                        Show status of all workstreams
 
