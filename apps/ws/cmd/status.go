@@ -31,6 +31,9 @@ var statusCmd = &cobra.Command{
 			liveSessions[line] = true
 		}
 
+		// Surface any active focus sessions so a borrowed branch is never invisible.
+		focusReg, _ := core.LoadFocusRegistry(core.DefaultFocusPath())
+
 		fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n", "WORKSTREAM", "AGENT", "STATUS", "HOST", "BRANCH", "SESSION")
 		fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n", "----------", "-----", "------", "----", "------", "-------")
 
@@ -52,14 +55,29 @@ var statusCmd = &cobra.Command{
 				status = "dead"
 			}
 
-			fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s\n",
+			focused := ""
+			if focusReg != nil {
+				if _, ok := focusReg.ForWorkstream(node.ID); ok {
+					focused = " ★ focused"
+				}
+			}
+
+			fmt.Printf("%-20s %-10s %-10s %-15s %-30s %s%s\n",
 				node.ID,
 				node.Agent,
 				status,
 				host,
 				node.Branch,
 				node.Session,
+				focused,
 			)
+		}
+
+		if focusReg != nil && len(focusReg.Active) > 0 {
+			fmt.Println()
+			for _, f := range focusReg.Active {
+				fmt.Printf("focused: %s -> %s (was %s)\n", f.WorkstreamID, f.RepoDir, f.RepoPrevBranch)
+			}
 		}
 		return nil
 	},
